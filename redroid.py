@@ -15,7 +15,6 @@ import subprocess
 
 def main():
     dockerfile = ""
-    tags = []
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-a', '--android-version',
@@ -23,6 +22,14 @@ def main():
                         help='Specify the Android version to build',
                         default='11.0.0',
                         choices=['14.0.0', '13.0.0', '12.0.0', '12.0.0_64only', '11.0.0', '10.0.0', '9.0.0', '8.1.0'])
+    parser.add_argument('-b', '--base-image',
+                        dest='base_image',
+                        help='Specify the base container image',
+                        required=True)
+    parser.add_argument('-o', '--output-image',
+                        dest='output_image',
+                        help='Specify the output container image',
+                        required=True)
     parser.add_argument('-g', '--install-gapps',
                         dest='gapps',
                         help='Install OpenGapps to ReDroid',
@@ -56,32 +63,27 @@ def main():
                         choices=['docker', 'podman'])
 
     args = parser.parse_args()
-    dockerfile = dockerfile + \
-        "FROM redroid/redroid:{}-latest\n".format(
-            args.android)
-    tags.append(args.android)
+    # FROM preserves custom image configuration, including Floral's entrypoint
+    # and any default arguments configured by the selected base image.
+    dockerfile = dockerfile + "FROM {}\n".format(args.base_image)
     if args.gapps:
         if args.android in ["11.0.0"]:
             Gapps().install()
             dockerfile = dockerfile + "COPY gapps /\n"
-            tags.append("gapps")
         else:
             helper.print_color( "WARNING: OpenGapps only supports 11.0.0", helper.bcolors.YELLOW)
     if args.litegapps:
         LiteGapps(args.android).install()
         dockerfile = dockerfile + "COPY litegapps /\n"
-        tags.append("litegapps")
     if args.mindthegapps:
         MindTheGapps(args.android).install()
         dockerfile = dockerfile + "COPY mindthegapps /\n"
-        tags.append("mindthegapps")
     if args.ndk:
         if args.android in ["11.0.0", "12.0.0", "12.0.0_64only"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
                 Ndk().install()
                 dockerfile = dockerfile+"COPY ndk /\n"
-                tags.append("ndk")
         else:
             helper.print_color(
                 "WARNING: Libndk seems to work only on redroid:11.0.0 or redroid:12.0.0", helper.bcolors.YELLOW)
@@ -93,23 +95,20 @@ def main():
                 if not args.android == "8.1.0":
                     Houdini_Hack(args.android).install()
                 dockerfile = dockerfile+"COPY houdini /\n"
-                tags.append("houdini") 
         else:
             helper.print_color(
                 "WARNING: Houdini seems to work only above redroid:11.0.0", helper.bcolors.YELLOW)
     if args.magisk:
         Magisk().install()
         dockerfile = dockerfile+"COPY magisk /\n"
-        tags.append("magisk")
     if args.widevine:
         Widevine(args.android).install()
         dockerfile = dockerfile+"COPY widevine /\n"
-        tags.append("widevine")
     print("\nDockerfile\n"+dockerfile)
     with open("./Dockerfile", "w") as f:
         f.write(dockerfile)
-    new_image_name = "redroid/redroid:"+"_".join(tags)
-    subprocess.run([args.container, "build", "-t", new_image_name, "."])
+    new_image_name = args.output_image
+    subprocess.run([args.container, "build", "-t", new_image_name, "."], check=True)
     helper.print_color("Successfully built {}".format(
         new_image_name), helper.bcolors.GREEN)
 

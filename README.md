@@ -6,6 +6,29 @@ If redroid-script doesn't work, please create an issue
 ## Dependencies
 - lzip
 
+## Specify input and output images
+
+The base and output image names are required. The generated image inherits any
+entrypoint and default arguments configured by the base image, including
+Floral's hardware entrypoint.
+
+```bash
+python redroid.py \
+    -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-magisk \
+    -m
+```
+
+Upstream ReDroid images remain supported when selected explicitly:
+
+```bash
+python redroid.py \
+    -a 12.0.0 \
+    -b redroid/redroid:12.0.0-latest \
+    -o redroid/redroid:12.0.0-custom
+```
+
 ## Specify container type
 
 Specify container type. Default is docker
@@ -18,11 +41,16 @@ option:
 
 ## Specify an Android version
 
-Use `-a` or `--android-version` to specify the Android version of the image being pulled. The value can be `8.1.0`, `9.0.0`, `10.0.0`, `11.0.0`, `12.0.0`, `12.0.0_64only` or `13.0.0`. The default is 11.0.0.
+Use `-a` or `--android-version` to select the Android-compatible package
+versions. It must match the selected base image. The value can be `8.1.0`,
+`9.0.0`, `10.0.0`, `11.0.0`, `12.0.0`, `12.0.0_64only`, `13.0.0` or
+`14.0.0`. The default is `11.0.0`.
 
 ```bash
 # pull the latest image
-python redroid.py -a 11.0.0
+python redroid.py -a 11.0.0 \
+    -b redroid/redroid:11.0.0-latest \
+    -o redroid/redroid:11.0.0-custom
 ```
 
 ## Add OpenGapps to ReDroid image
@@ -30,19 +58,28 @@ python redroid.py -a 11.0.0
 <img src="./assets/3.png" style="zoom:50%;" />
 
 ```bash
-python redroid.py -g
+python redroid.py -a 11.0.0 \
+    -b redroid/redroid:11.0.0-latest \
+    -o redroid/redroid:11.0.0-gapps \
+    -g
 ```
 
 ## Add liteGapps to ReDroid image
 
 ```bash
-python redroid.py -lg
+python redroid.py -a 11.0.0 \
+    -b redroid/redroid:11.0.0-latest \
+    -o redroid/redroid:11.0.0-litegapps \
+    -lg
 ```
 
 ## Add MindTheGapps to ReDroid image
 
 ```bash
-python redroid.py -mtg
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-mindthegapps \
+    -mtg
 ```
 
 ## Add libndk arm translation to ReDroid image
@@ -53,7 +90,10 @@ libndk_translation from guybrush firmware.
 libndk seems to have better performance than libhoudini on AMD.
 
 ```bash
-python redroid.py -n
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-ndk \
+    -n
 ```
 
 ## Add Magisk to ReDroid image
@@ -64,15 +104,21 @@ Zygisk and modules like LSPosed should work.
 
 
 ```bash
-python redroid.py -m
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-magisk \
+    -m
 ```
 
 ## Add widevine DRM(L3) to ReDroid image
 
 ![](assets/4.png)
 
-```
-python redroid.py -w
+```bash
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-widevine \
+    -w
 ```
 
 
@@ -82,7 +128,10 @@ python redroid.py -w
 This command will add Gapps, Magisk, Libndk, Widevine to the ReDroid image at the same time.
 
 ```bash
-python redroid.py -a 11.0.0 -gmnw
+python redroid.py -a 11.0.0 \
+    -b redroid/redroid:11.0.0-latest \
+    -o redroid/redroid:11.0.0-gapps-ndk-magisk-widevine \
+    -gmnw
 ```
 
 Then start the docker container.

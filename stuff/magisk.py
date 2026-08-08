@@ -7,9 +7,9 @@ from tools.helper import bcolors, download_file, host, print_color, run, get_dow
 
 class Magisk(General):
     download_loc = get_download_dir()
-    dl_link = "https://github.com/ayasa520/Magisk/releases/download/v30.7/Magisk-v30.7.apk"
+    dl_link = "https://github.com/FloralDroid/Magisk/releases/download/v30.7-floral.1/Magisk-v30.7-floral.1.apk"
     dl_file_name = os.path.join(download_loc, "magisk.apk")
-    act_md5 = "0a31050fdcfaa15f47c9dd1eb8d04fc8"
+    act_md5 = "4e7adff8ddaea6cad9a47a67f89ad881"
     extract_to = "/tmp/magisk_unpack"
     copy_dir = "./magisk"
     magisk_dir = os.path.join(copy_dir, "system", "etc", "init", "magisk")
@@ -40,7 +40,7 @@ on property:vold.decrypt=trigger_restart_framework
 on property:sys.boot_completed=1
     mkdir /data/adb/magisk 755
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --boot-complete
-    exec -- /system/bin/sh -c "if [ ! -e /data/data/io.github.huskydg.magisk ] ; then pm install /system/etc/init/magisk/magisk.apk ; fi"
+    exec -- /system/bin/sh -c "if ! pm path com.topjohnwu.magisk >/dev/null 2>&1 ; then pm install /system/etc/init/magisk/magisk.apk ; fi"
    
 on property:init.svc.zygote=restarting
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --zygote-restart

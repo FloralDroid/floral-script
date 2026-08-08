@@ -3,7 +3,7 @@ import os
 import shutil
 import re
 from stuff.general import General
-from tools.helper import bcolors, download_file, host, print_color, run, get_download_dir
+from tools.helper import bcolors, download_file, host, print_color, get_download_dir
 
 class Magisk(General):
     download_loc = get_download_dir()
@@ -40,7 +40,7 @@ on property:vold.decrypt=trigger_restart_framework
 on property:sys.boot_completed=1
     mkdir /data/adb/magisk 755
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --boot-complete
-    exec -- /system/bin/sh -c "if ! pm path com.topjohnwu.magisk >/dev/null 2>&1 ; then pm install /system/etc/init/magisk/magisk.apk ; fi"
+    exec -- /system/bin/sh -c "pm install -r /system/etc/init/magisk/magisk.apk >/dev/null 2>&1 || {{ pm uninstall com.topjohnwu.magisk >/dev/null 2>&1 || true; pm install /system/etc/init/magisk/magisk.apk; }}"
    
 on property:init.svc.zygote=restarting
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --zygote-restart
@@ -77,8 +77,15 @@ on property:init.svc.zygote=stopped
                 filename = re.search(r'lib(.*)\.so', filename)
                 n_path = os.path.join(self.magisk_dir, filename.group(1))
                 shutil.copyfile(o_path, n_path)
-                run(["chmod", "+x", n_path])
+                os.chmod(n_path, 0o755)
         shutil.copyfile(self.dl_file_name, os.path.join(self.magisk_dir,"magisk.apk") )
+
+        # The daemon trusts the certificate from the bundled stub APK. Keep it
+        # beside the native binaries so --setup-sbin can place it in /sbin.
+        stub_path = os.path.join(self.extract_to, "assets", "stub.apk")
+        if not os.path.isfile(stub_path):
+            raise FileNotFoundError(f"Missing Magisk stub APK: {stub_path}")
+        shutil.copyfile(stub_path, os.path.join(self.magisk_dir, "stub.apk"))
 
         # Updating Magisk from Magisk manager will modify bootanim.rc, 
         # So it is necessary to backup the original bootanim.rc.
@@ -86,7 +93,21 @@ on property:init.svc.zygote=stopped
         gz_filename = os.path.join(bootanim_path)+".gz"
         with gzip.open(gz_filename,'wb') as f_gz:
             f_gz.write(self.oringinal_bootanim.encode('utf-8'))
+        os.chmod(gz_filename, 0o644)
         with open(bootanim_path, "w") as initfile:
             initfile.write(self.oringinal_bootanim+self.bootanim_component)
 
+        # Docker preserves directory modes when copying this staging tree into
+        # the image. Keep system directories traversable regardless of the
+        # host umask, and use normal read-only modes for packaged artifacts.
+        for directory in (
+                self.copy_dir,
+                os.path.join(self.copy_dir, "system"),
+                os.path.join(self.copy_dir, "system", "etc"),
+                os.path.join(self.copy_dir, "system", "etc", "init"),
+                self.magisk_dir,
+                os.path.join(self.copy_dir, "sbin")):
+            os.chmod(directory, 0o755)
+        os.chmod(os.path.join(self.magisk_dir, "magisk.apk"), 0o644)
+        os.chmod(os.path.join(self.magisk_dir, "stub.apk"), 0o644)
         os.chmod(bootanim_path, 0o644)

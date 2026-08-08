@@ -82,7 +82,7 @@ def main():
         if args.android in ["11.0.0", "12.0.0", "12.0.0_64only"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
-                Ndk().install()
+                Ndk(args.android).install()
                 dockerfile = dockerfile+"COPY ndk /\n"
         else:
             helper.print_color(

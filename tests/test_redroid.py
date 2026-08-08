@@ -1,17 +1,115 @@
+import hashlib
 import io
 import os
 import stat
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
 import redroid
+from stuff.general import General
 from stuff.magisk import Magisk
+from stuff.ndk import Ndk
 
 
 class RedroidTest(unittest.TestCase):
+    def test_ndk_release_matches_android_version(self):
+        android_11 = Ndk("11.0.0")
+        android_12 = Ndk("12.0.0")
+        android_12_64only = Ndk("12.0.0_64only")
+
+        self.assertEqual(
+            android_11.commit,
+            "9324a8914b649b885dad6f2bfd14a67e5d1520bf")
+        self.assertEqual(
+            android_12.commit,
+            "181d9290a69309511185c4417ba3d890b3caaaa8")
+        self.assertEqual(android_12.release, android_12_64only.release)
+        self.assertNotEqual(android_11.dl_file_name, android_12.dl_file_name)
+
+    def test_ndk_rejects_unsupported_android_version(self):
+        with self.assertRaisesRegex(ValueError, "Android 13.0.0"):
+            Ndk("13.0.0")
+
+    def test_general_extract_removes_stale_files(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            archive_path = os.path.join(work_dir, "archive.zip")
+            extract_dir = os.path.join(work_dir, "extract")
+            os.makedirs(extract_dir)
+            with open(os.path.join(extract_dir, "stale"), "w", encoding="utf-8"):
+                pass
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("current", "ok")
+
+            installer = General()
+            installer.dl_file_name = archive_path
+            installer.extract_to = extract_dir
+            installer.extract()
+
+            self.assertFalse(os.path.exists(os.path.join(extract_dir, "stale")))
+            self.assertTrue(os.path.isfile(os.path.join(extract_dir, "current")))
+
+    def test_ndk_copy_validates_files_and_normalizes_permissions(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            installer = Ndk("12.0.0")
+            installer.extract_to = os.path.join(work_dir, "extract")
+            installer.archive_root = "source"
+            installer.copy_dir = os.path.join(work_dir, "copy")
+            source_root = os.path.join(installer.extract_to, "source")
+            prebuilt_dir = os.path.join(source_root, "prebuilts")
+            os.makedirs(prebuilt_dir)
+
+            readme_path = os.path.join(source_root, "README.md")
+            with open(readme_path, "w", encoding="utf-8") as readme:
+                readme.write(installer.release["fingerprint"])
+
+            library_hashes = {}
+            for relative_path in installer.release["library_sha256"]:
+                file_path = os.path.join(prebuilt_dir, relative_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                contents = relative_path.encode("utf-8")
+                with open(file_path, "wb") as library:
+                    library.write(contents)
+                library_hashes[relative_path] = hashlib.sha256(
+                    contents).hexdigest()
+            installer.release = dict(installer.release)
+            installer.release["library_sha256"] = library_hashes
+
+            for relative_path in installer.executable_files + (
+                    "etc/init/ndk_translation.rc",):
+                file_path = os.path.join(prebuilt_dir, relative_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "wb") as required_file:
+                    required_file.write(b"required")
+                os.chmod(file_path, 0o600)
+
+            installer.copy()
+
+            system_dir = os.path.join(installer.copy_dir, "system")
+            executable = os.path.join(system_dir, installer.executable_files[0])
+            library = os.path.join(system_dir, "lib64", "libndk_translation.so")
+            self.assertEqual(stat.S_IMODE(os.stat(executable).st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE(os.stat(library).st_mode), 0o644)
+
+    def test_ndk_rejects_tampered_translation_library(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            installer = Ndk("12.0.0")
+            source_root = os.path.join(work_dir, "source")
+            library_path = os.path.join(
+                source_root, "prebuilts", "lib", "libndk_translation.so")
+            os.makedirs(os.path.dirname(library_path))
+            with open(os.path.join(source_root, "README.md"), "w",
+                      encoding="utf-8") as readme:
+                readme.write(installer.release["fingerprint"])
+            with open(library_path, "wb") as library:
+                library.write(b"tampered")
+
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                installer.validate_source(source_root)
+
     def test_magisk_release_is_pinned_to_floral_build(self):
         self.assertEqual(
             Magisk.dl_link,
@@ -45,8 +143,7 @@ class RedroidTest(unittest.TestCase):
             with patch.object(Magisk, "extract_to", extract_dir), \
                     patch.object(Magisk, "copy_dir", copy_dir), \
                     patch.object(Magisk, "magisk_dir", magisk_dir), \
-                    patch.object(Magisk, "dl_file_name", source_apk), \
-                    patch("stuff.magisk.run"):
+                    patch.object(Magisk, "dl_file_name", source_apk):
                 Magisk().copy()
 
             with open(os.path.join(magisk_dir, "stub.apk"), "rb") as stub:
@@ -93,6 +190,34 @@ class RedroidTest(unittest.TestCase):
             ["docker", "build", "-t", "floral:12.0.0-custom", "."],
             check=True,
         )
+
+    def test_ndk_build_passes_selected_android_version(self):
+        arguments = [
+            "redroid.py",
+            "-a",
+            "12.0.0",
+            "-b",
+            "floral:12.0.0",
+            "-o",
+            "floral:12.0.0-ndk",
+            "-n",
+        ]
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            original_dir = os.getcwd()
+            with patch.object(sys, "argv", arguments), \
+                    patch("redroid.Ndk") as ndk, \
+                    patch("redroid.helper.host", return_value=("x86_64", 64)), \
+                    patch("redroid.subprocess.run"), \
+                    patch("builtins.print"):
+                os.chdir(work_dir)
+                try:
+                    redroid.main()
+                finally:
+                    os.chdir(original_dir)
+
+        ndk.assert_called_once_with("12.0.0")
+        ndk.return_value.install.assert_called_once_with()
 
 
 if __name__ == "__main__":

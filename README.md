@@ -85,7 +85,11 @@ python redroid.py -a 12.0.0 \
 ## Add libndk arm translation to ReDroid image
 <img src="./assets/2.png" style="zoom:50%;" />
 
-libndk_translation from guybrush firmware.
+Android 11 uses libndk_translation from the Guybrush Android 11 firmware.
+Android 12 uses the matching 64-bit translator and guest libraries from an
+Android 12 AVD; its 32-bit translator remains the Android 11 AVD build because
+Google did not publish a matching Android 12 32-bit guest image in this bundle.
+The packaging script pins and verifies each source separately.
 
 libndk seems to have better performance than libhoudini on AMD.
 
@@ -186,7 +190,10 @@ docker run -itd --rm --privileged \
 
 - libndk doesn't work
   
-    I only made it work on `redroid/redroid:11.0.0`. Also, turning on Zygisk seems to break libndk for 32 bit apps, but arm64 apps still work.
+    Use an image built with the same `-a` Android version as its base image.
+    Android 11 and Android 12 use different translation libraries. Turning on
+    Zygisk may still break libndk for 32-bit apps, while ARM64 apps can continue
+    to work.
     
 - libhoudini doesn't work
   

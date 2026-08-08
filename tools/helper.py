@@ -1,9 +1,19 @@
+import hashlib
 import os
 import platform
 import subprocess
+
 import requests
 from tqdm import tqdm
-import hashlib
+
+
+def file_checksum(file_name, algorithm="md5"):
+    digest = hashlib.new(algorithm)
+    with open(file_name, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
 
 def get_download_dir():
     download_loc = ""
@@ -14,6 +24,7 @@ def get_download_dir():
     if not os.path.exists(download_loc):
         os.makedirs(download_loc)
     return download_loc
+
 
 def run(args):
     result = subprocess.run(args=args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -26,9 +37,10 @@ def run(args):
                 )
     return result
 
-def download_file(url, f_name):
-    md5 = ""
-    response = requests.get(url, stream=True)
+
+def download_file(url, f_name, checksum_algorithm="md5"):
+    response = requests.get(url, stream=True, timeout=(15, 300))
+    response.raise_for_status()
     total_size_in_bytes = int(response.headers.get('content-length', 0))
     block_size = 1024  # 1 Kibibyte
     progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
@@ -37,12 +49,10 @@ def download_file(url, f_name):
             progress_bar.update(len(data))
             file.write(data)
     progress_bar.close()
-    with open(f_name, "rb") as f:
-        bytes = f.read()
-        md5 = hashlib.md5(bytes).hexdigest()
     if total_size_in_bytes != 0 and progress_bar.n != total_size_in_bytes:
         raise ValueError("Something went wrong while downloading")
-    return md5
+    return file_checksum(f_name, checksum_algorithm)
+
 
 def host():
     machine = platform.machine()
@@ -64,11 +74,13 @@ def host():
     raise ValueError("platform.machine '" + machine + "'"
                      " architecture is not supported")
 
+
 class bcolors:
     RED = '\033[31m'
     YELLOW = '\033[33m'
     GREEN = '\033[32m'
     ENDC = '\033[0m'
+
 
 def print_color(str, color):
     print(color+str+bcolors.ENDC)

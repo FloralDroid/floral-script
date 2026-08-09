@@ -28,9 +28,14 @@ service bootanim /system/bin/bootanimation
     bootanim_component = """
 on post-fs-data
     start logd
-    exec u:r:su:s0 root root -- {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk
-    exec u:r:magisk:s0 root root -- {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk
-    exec u:r:update_engine:s0 root root -- {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk
+    # redroid commonly disables SELinux; avoid feeding a missing policy to magiskpolicy.
+    exec u:r:su:s0 root root -- /system/bin/sh -c "if [ -r /sys/fs/selinux/policy ]; then exec {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk; fi"
+    exec u:r:magisk:s0 root root -- /system/bin/sh -c "if [ -r /sys/fs/selinux/policy ]; then exec {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk; fi"
+    exec u:r:update_engine:s0 root root -- /system/bin/sh -c "if [ -r /sys/fs/selinux/policy ]; then exec {MAGISKSYSTEMDIR}/magiskpolicy --live --magisk; fi"
+    # Seed DATABIN before post-fs-data; package installation happens at boot-complete.
+    mkdir /data/adb 700
+    mkdir /data/adb/magisk 755
+    exec u:r:su:s0 root root -- /system/bin/sh -c "cp -f {MAGISKSYSTEMDIR}/busybox /data/adb/magisk/busybox && chmod 755 /data/adb/magisk/busybox; if [ -f {MAGISKSYSTEMDIR}/magiskpolicy ]; then cp -f {MAGISKSYSTEMDIR}/magiskpolicy /data/adb/magisk/magiskpolicy && chmod 755 /data/adb/magisk/magiskpolicy; fi"
     exec u:r:su:s0 root root -- {MAGISKSYSTEMDIR}/{magisk_name} --auto-selinux --setup-sbin {MAGISKSYSTEMDIR} {MAGISKTMP}
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --post-fs-data
 on nonencrypted

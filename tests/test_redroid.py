@@ -123,6 +123,21 @@ class RedroidTest(unittest.TestCase):
         self.assertNotIn("io.github.huskydg.magisk", Magisk.bootanim_component)
         self.assertIn("pm install -r /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
 
+    def test_magisk_bootstrap_handles_disabled_selinux_and_early_post_fs_data(self):
+        self.assertEqual(
+            Magisk.bootanim_component.count("if [ -r /sys/fs/selinux/policy ]; then"),
+            3,
+        )
+        self.assertIn("mkdir /data/adb/magisk 755", Magisk.bootanim_component)
+        self.assertIn(
+            "cp -f /system/etc/init/magisk/busybox /data/adb/magisk/busybox",
+            Magisk.bootanim_component,
+        )
+        self.assertIn(
+            "cp -f /system/etc/init/magisk/magiskpolicy /data/adb/magisk/magiskpolicy",
+            Magisk.bootanim_component,
+        )
+
     def test_magisk_copy_includes_stub_apk_for_signature_verification(self):
         with tempfile.TemporaryDirectory() as work_dir:
             extract_dir = os.path.join(work_dir, "extract")

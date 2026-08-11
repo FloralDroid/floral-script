@@ -37,7 +37,8 @@ on post-fs-data
     mkdir /data/adb/magisk 755
     exec u:r:su:s0 root root -- /system/bin/sh -c "cp -f {MAGISKSYSTEMDIR}/busybox /data/adb/magisk/busybox && chmod 755 /data/adb/magisk/busybox; if [ -f {MAGISKSYSTEMDIR}/magiskpolicy ]; then cp -f {MAGISKSYSTEMDIR}/magiskpolicy /data/adb/magisk/magiskpolicy && chmod 755 /data/adb/magisk/magiskpolicy; fi"
     exec u:r:su:s0 root root -- {MAGISKSYSTEMDIR}/{magisk_name} --auto-selinux --setup-sbin {MAGISKSYSTEMDIR} {MAGISKTMP}
-    exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --post-fs-data
+    # Inject applets into /system/bin. Android app UIDs cannot traverse Magisk's /system/xbin mount.
+    exec u:r:su:s0 root root -- /system/bin/sh -c "PATH=/system/bin; export PATH; exec {MAGISKTMP}/magisk --auto-selinux --post-fs-data"
 on nonencrypted
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --service
 on property:vold.decrypt=trigger_restart_framework

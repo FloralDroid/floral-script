@@ -137,6 +137,10 @@ class RedroidTest(unittest.TestCase):
             "cp -f /system/etc/init/magisk/magiskpolicy /data/adb/magisk/magiskpolicy",
             Magisk.bootanim_component,
         )
+        self.assertIn(
+            "PATH=/system/bin; export PATH; exec /sbin/magisk --auto-selinux --post-fs-data",
+            Magisk.bootanim_component,
+        )
 
     def test_magisk_copy_includes_stub_apk_for_signature_verification(self):
         with tempfile.TemporaryDirectory() as work_dir:

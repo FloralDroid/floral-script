@@ -138,6 +138,9 @@ class Ndk(General):
             os.path.join(source_root, "prebuilts"), system_dir,
             dirs_exist_ok=True)
         self.normalize_permissions(system_dir)
+        if self.android_version.startswith("12.0.0"):
+            self.route_binfmt_to(
+                system_dir, "/system/bin/floral_nativebridge_runner")
 
         init_path = os.path.join(
             system_dir, "etc", "init", "ndk_translation.rc")

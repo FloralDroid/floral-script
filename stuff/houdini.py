@@ -84,4 +84,8 @@ on property:sys.boot_completed=1
             os.makedirs(os.path.dirname(init_path), exist_ok=True)
         with open(init_path, "w") as initfile:
             initfile.write(self.init_rc_component)
+        if self.version == "12.0.0":
+            self.route_binfmt_to(
+                os.path.join(self.copy_dir, "system"),
+                "/system/bin/floral_nativebridge_runner")
         os.chmod(init_path, 0o644)

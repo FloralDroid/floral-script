@@ -52,6 +52,35 @@ class RedroidTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(extract_dir, "stale")))
             self.assertTrue(os.path.isfile(os.path.join(extract_dir, "current")))
 
+    def test_general_routes_binfmt_and_init_to_dispatcher(self):
+        with tempfile.TemporaryDirectory() as system_dir:
+            binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
+            init_dir = os.path.join(system_dir, "etc", "init")
+            os.makedirs(binfmt_dir)
+            os.makedirs(init_dir)
+            registration_path = os.path.join(binfmt_dir, "arm64_exe")
+            with open(registration_path, "w", encoding="utf-8") as registration:
+                registration.write(
+                    ":arm64_exe:M::magic::/system/bin/houdini64:P\n")
+            init_path = os.path.join(init_dir, "translation.rc")
+            with open(init_path, "w", encoding="utf-8") as init_file:
+                init_file.write(
+                    "exec -- /system/bin/"
+                    "ndk_translation_program_runner_binfmt_misc_arm64\n")
+
+            General.route_binfmt_to(
+                system_dir, "/system/bin/floral_nativebridge_runner")
+
+            with open(registration_path, encoding="utf-8") as registration:
+                self.assertEqual(
+                    registration.read(),
+                    ":arm64_exe:M::magic::/system/bin/"
+                    "floral_nativebridge_runner:P\n")
+            with open(init_path, encoding="utf-8") as init_file:
+                self.assertEqual(
+                    init_file.read(),
+                    "exec -- /system/bin/floral_nativebridge_runner\n")
+
     def test_ndk_copy_validates_files_and_normalizes_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:
             installer = Ndk("12.0.0")

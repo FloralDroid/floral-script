@@ -9,7 +9,7 @@ import zipfile
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
-import redroid
+import patch as redroid
 from stuff.general import General
 from stuff.houdini import Houdini
 from stuff.houdini_hack import Houdini_Hack
@@ -321,7 +321,7 @@ class RedroidTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work_dir:
             original_dir = os.getcwd()
             with patch.object(sys, "argv", arguments), \
-                    patch("redroid.subprocess.run") as build, \
+                    patch("patch.subprocess.run") as build, \
                     patch("builtins.print"):
                 os.chdir(work_dir)
                 try:
@@ -352,9 +352,9 @@ class RedroidTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work_dir:
             original_dir = os.getcwd()
             with patch.object(sys, "argv", arguments), \
-                    patch("redroid.Ndk") as ndk, \
-                    patch("redroid.helper.host", return_value=("x86_64", 64)), \
-                    patch("redroid.subprocess.run"), \
+                    patch("patch.Ndk") as ndk, \
+                    patch("patch.helper.host", return_value=("x86_64", 64)), \
+                    patch("patch.subprocess.run"), \
                     patch("builtins.print"):
                 os.chdir(work_dir)
                 try:

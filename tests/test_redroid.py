@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 import redroid
 from stuff.general import General
+from stuff.houdini import Houdini
+from stuff.houdini_hack import Houdini_Hack
 from stuff.magisk import Magisk
 from stuff.ndk import Ndk
 
@@ -138,6 +140,102 @@ class RedroidTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 installer.validate_source(source_root)
+
+    def test_houdini_copy_normalizes_permissions(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            installer = Houdini("12.0.0")
+            installer.extract_to = os.path.join(work_dir, "extract")
+            installer.copy_dir = os.path.join(work_dir, "copy")
+            archive_root = os.path.join(
+                installer.extract_to,
+                "vendor_intel_proprietary_houdini-debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8",
+                "prebuilts",
+            )
+            for relative_path in (
+                    "bin/houdini",
+                    "bin/houdini64",
+                    "lib/arm/libc.so",
+                    "lib64/arm64/libc.so",
+                    "lib/libhoudini.so",
+                    "lib64/libhoudini.so",
+                    "etc/binfmt_misc/arm64_exe",
+                    "etc/init/arm.rc"):
+                file_path = os.path.join(archive_root, relative_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "wb") as payload:
+                    if relative_path == "etc/binfmt_misc/arm64_exe":
+                        payload.write(
+                            b":arm64_exe:M::magic::/system/bin/houdini64:P\n")
+                    else:
+                        payload.write(b"payload")
+                os.chmod(file_path, 0o600)
+
+            installer.copy()
+
+            system_dir = os.path.join(installer.copy_dir, "system")
+            for relative_path in (
+                    "lib/arm/libc.so",
+                    "lib64/arm64/libc.so",
+                    "lib/libhoudini.so",
+                    "lib64/libhoudini.so",
+                    "etc/binfmt_misc/arm64_exe",
+                    "etc/init/arm.rc",
+                    "etc/init/houdini.rc"):
+                file_path = os.path.join(system_dir, relative_path)
+                self.assertEqual(stat.S_IMODE(os.stat(file_path).st_mode), 0o644)
+
+            for relative_path in installer.executable_files:
+                file_path = os.path.join(system_dir, relative_path)
+                self.assertEqual(stat.S_IMODE(os.stat(file_path).st_mode), 0o755)
+
+            self.assertEqual(
+                stat.S_IMODE(
+                    os.stat(os.path.join(system_dir, "lib", "arm")).st_mode),
+                0o755,
+            )
+
+    def test_houdini_hack_normalizes_only_overlay_permissions(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            installer = Houdini_Hack("12.0.0")
+            installer.extract_to = os.path.join(work_dir, "extract")
+            installer.copy_dir = os.path.join(work_dir, "copy")
+            archive_root = os.path.join(
+                installer.extract_to,
+                "redroid_libhoudini_hack-"
+                "a2194c5e294cbbfdfe87e51eb9eddb4c3621d8c3",
+                installer.version,
+            )
+            patch_path = os.path.join(archive_root, "etc", "ld_config.patch")
+            os.makedirs(os.path.dirname(patch_path))
+            with open(patch_path, "wb") as linker_patch:
+                linker_patch.write(b"patch")
+            os.chmod(patch_path, 0o600)
+            init_path = os.path.join(
+                archive_root, "etc", "init", "hw", "init.rc")
+            os.makedirs(os.path.dirname(init_path))
+            with open(init_path, "wb") as init_file:
+                init_file.write(b"init")
+            os.chmod(init_path, 0o600)
+
+            houdini_path = os.path.join(
+                installer.copy_dir, "system", "bin", "houdini64")
+            os.makedirs(os.path.dirname(houdini_path))
+            with open(houdini_path, "wb") as interpreter:
+                interpreter.write(b"interpreter")
+            os.chmod(houdini_path, 0o755)
+
+            installer.copy()
+
+            copied_patch = os.path.join(
+                installer.copy_dir, "system", "etc", "ld_config.patch")
+            self.assertEqual(
+                stat.S_IMODE(os.stat(copied_patch).st_mode), 0o644)
+            copied_init = os.path.join(
+                installer.copy_dir, "system", "etc", "init", "hw", "init.rc")
+            self.assertEqual(
+                stat.S_IMODE(os.stat(copied_init).st_mode), 0o644)
+            self.assertEqual(
+                stat.S_IMODE(os.stat(houdini_path).st_mode), 0o755)
 
     def test_magisk_release_is_pinned_to_floral_build(self):
         self.assertEqual(

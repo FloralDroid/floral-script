@@ -2,12 +2,16 @@ import os
 import re
 import shutil
 from stuff.general import General
-from tools.helper import bcolors, get_download_dir, print_color, run
+from tools.helper import bcolors, get_download_dir, print_color
 
 
 class Houdini(General):
     download_loc = get_download_dir()
     copy_dir = "./houdini"
+    executable_files = (
+        "bin/houdini",
+        "bin/houdini64",
+    )
     init_rc_component = """
 on early-init
     mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
@@ -69,23 +73,47 @@ on property:sys.boot_completed=1
         print_color("Downloading libhoudini now .....", bcolors.GREEN)
         super().download()
 
+    def normalize_permissions(self, system_dir):
+        # ZIP extraction can leave the Houdini payload at 0600. Android
+        # services need to read the guest libraries, while only the two
+        # binfmt interpreters need execute permission.
+        for parent, directories, files in os.walk(system_dir):
+            os.chmod(parent, 0o755)
+            for directory in directories:
+                os.chmod(os.path.join(parent, directory), 0o755)
+            for file_name in files:
+                file_path = os.path.join(parent, file_name)
+                if not os.path.islink(file_path):
+                    os.chmod(file_path, 0o644)
+
+        for relative_path in self.executable_files:
+            os.chmod(os.path.join(system_dir, relative_path), 0o755)
+
     def copy(self):
         if os.path.exists(self.copy_dir):
             shutil.rmtree(self.copy_dir)
-        run(["chmod", "+x", self.extract_to, "-R"])
 
         print_color("Copying libhoudini library files ...", bcolors.GREEN)
-        name = re.findall("([a-zA-Z0-9]+)\.zip", self.dl_link)[0]
-        shutil.copytree(os.path.join(self.extract_to, "vendor_intel_proprietary_houdini-" + name,
-                        "prebuilts"), os.path.join(self.copy_dir, "system"), dirs_exist_ok=True)
+        name = re.findall(r"([a-zA-Z0-9]+)\.zip", self.dl_link)[0]
+        system_dir = os.path.join(self.copy_dir, "system")
+        shutil.copytree(
+            os.path.join(
+                self.extract_to,
+                "vendor_intel_proprietary_houdini-" + name,
+                "prebuilts",
+            ),
+            system_dir,
+            dirs_exist_ok=True,
+        )
 
-        init_path = os.path.join(self.copy_dir, "system", "etc", "init", "houdini.rc")
+        init_path = os.path.join(system_dir, "etc", "init", "houdini.rc")
         if not os.path.isfile(init_path):
             os.makedirs(os.path.dirname(init_path), exist_ok=True)
         with open(init_path, "w") as initfile:
             initfile.write(self.init_rc_component)
+        self.normalize_permissions(system_dir)
         if self.version == "12.0.0":
             self.route_binfmt_to(
-                os.path.join(self.copy_dir, "system"),
+                system_dir,
                 "/system/bin/floral_nativebridge_runner")
         os.chmod(init_path, 0o644)

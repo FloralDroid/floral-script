@@ -30,8 +30,6 @@ class Ndk(General):
             "google/sdk_gphone64_x86_64/emulator64_x86_64_arm64:12/"
             "S2B2.211203.006/8015633:user/dev-keys"),
         "library_sha256": {
-            "lib/libndk_translation.so": (
-                "0323ac82b5f6a986be2ae20400cff9b54252b8ba557c2562def2c2e283de2687"),
             "lib64/libndk_translation.so": (
                 "46432c5ce6aae55c0191c198573780d52ffbbd518dfcbd8ccf262545e39823a6"),
         },
@@ -41,12 +39,17 @@ class Ndk(General):
         "12.0.0": android_12_release,
         "12.0.0_64only": android_12_release,
     }
-    executable_files = (
+    all_executable_files = (
         "bin/arm/app_process",
         "bin/arm/linker",
         "bin/arm64/app_process64",
         "bin/arm64/linker64",
         "bin/ndk_translation_program_runner_binfmt_misc",
+        "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+    )
+    android_12_executable_files = (
+        "bin/arm64/app_process64",
+        "bin/arm64/linker64",
         "bin/ndk_translation_program_runner_binfmt_misc_arm64",
     )
 #     init_rc_component = """
@@ -99,7 +102,7 @@ class Ndk(General):
                     "SHA-256 mismatch for {}: expected {}, got {}".format(
                         relative_path, expected_sha256, actual_sha256))
 
-        required_files = self.executable_files + (
+        required_files = self.executable_files() + (
             "etc/init/ndk_translation.rc",)
         for relative_path in required_files:
             required_path = os.path.join(prebuilt_dir, relative_path)
@@ -107,9 +110,28 @@ class Ndk(General):
                 raise FileNotFoundError(
                     "Missing NDK translation file: {}".format(required_path))
 
+    def executable_files(self):
+        if self.android_version.startswith("12.0.0"):
+            return self.android_12_executable_files
+        return self.all_executable_files
+
+    def copy_paths(self):
+        if not self.android_version.startswith("12.0.0"):
+            return (".",)
+        return (
+            "bin/arm64",
+            "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+            "etc/binfmt_misc/arm64_dyn",
+            "etc/binfmt_misc/arm64_exe",
+            "etc/cpuinfo.arm64.txt",
+            "etc/init/ndk_translation.rc",
+            "etc/ld.config.arm64.txt",
+            "lib64",
+        )
+
     def normalize_permissions(self, system_dir):
         # GitHub ZIP extraction does not reliably preserve executable bits.
-        # Normalize the tree, then opt in only the six runtime executables.
+        # Normalize the tree, then opt in only the runtime executables.
         for parent, directories, files in os.walk(system_dir):
             os.chmod(parent, 0o755)
             for directory in directories:
@@ -119,7 +141,7 @@ class Ndk(General):
                 if not os.path.islink(file_path):
                     os.chmod(file_path, 0o644)
 
-        for relative_path in self.executable_files:
+        for relative_path in self.executable_files():
             os.chmod(os.path.join(system_dir, relative_path), 0o755)
 
     def download(self):
@@ -134,9 +156,17 @@ class Ndk(General):
         source_root = os.path.join(self.extract_to, self.archive_root)
         self.validate_source(source_root)
         system_dir = os.path.join(self.copy_dir, "system")
-        shutil.copytree(
-            os.path.join(source_root, "prebuilts"), system_dir,
-            dirs_exist_ok=True)
+        source_dir = os.path.join(source_root, "prebuilts")
+        for relative_path in self.copy_paths():
+            source_path = os.path.join(source_dir, relative_path)
+            target_path = os.path.join(system_dir, relative_path)
+            if relative_path == ".":
+                shutil.copytree(source_dir, system_dir, dirs_exist_ok=True)
+            elif os.path.isdir(source_path):
+                shutil.copytree(source_path, target_path, dirs_exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                shutil.copy2(source_path, target_path)
         self.normalize_permissions(system_dir)
         if self.android_version.startswith("12.0.0"):
             self.route_binfmt_to(

@@ -86,10 +86,11 @@ python redroid.py -a 12.0.0 \
 <img src="./assets/2.png" style="zoom:50%;" />
 
 Android 11 uses libndk_translation from the Guybrush Android 11 firmware.
-Android 12 uses the matching 64-bit translator and guest libraries from an
-Android 12 AVD; its 32-bit translator remains the Android 11 AVD build because
-Google did not publish a matching Android 12 32-bit guest image in this bundle.
-The packaging script pins and verifies each source separately.
+Android 12 uses only the matching 64-bit translator and guest libraries from an
+Android 12 AVD. The Android 12 32-bit translator is excluded because this bundle
+does not provide a matching Android 12 32-bit guest image; install Houdini when
+32-bit ARM application support is required. The packaging script pins and
+verifies each source separately.
 
 libndk seems to have better performance than libhoudini on AMD.
 

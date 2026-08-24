@@ -109,7 +109,7 @@ class RedroidTest(unittest.TestCase):
             installer.release = dict(installer.release)
             installer.release["library_sha256"] = library_hashes
 
-            for relative_path in installer.executable_files + (
+            for relative_path in installer.executable_files() + (
                     "etc/init/ndk_translation.rc",):
                 file_path = os.path.join(prebuilt_dir, relative_path)
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -117,20 +117,43 @@ class RedroidTest(unittest.TestCase):
                     required_file.write(b"required")
                 os.chmod(file_path, 0o600)
 
+            for relative_path in installer.copy_paths():
+                if (relative_path == "." or
+                        relative_path in installer.executable_files() or
+                        os.path.isdir(os.path.join(prebuilt_dir, relative_path))):
+                    continue
+                file_path = os.path.join(prebuilt_dir, relative_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "wb") as copied_file:
+                    if relative_path.endswith("arm64_exe"):
+                        copied_file.write(
+                            b":arm64_exe:M::magic::/system/bin/"
+                            b"ndk_translation_program_runner_binfmt_misc_arm64:P\n")
+                    elif relative_path.endswith("arm64_dyn"):
+                        copied_file.write(
+                            b":arm64_dyn:M::magic::/system/bin/"
+                            b"ndk_translation_program_runner_binfmt_misc_arm64:P\n")
+                    else:
+                        copied_file.write(b"copied")
+
             installer.copy()
 
             system_dir = os.path.join(installer.copy_dir, "system")
-            executable = os.path.join(system_dir, installer.executable_files[0])
+            executable = os.path.join(system_dir, installer.executable_files()[0])
             library = os.path.join(system_dir, "lib64", "libndk_translation.so")
             self.assertEqual(stat.S_IMODE(os.stat(executable).st_mode), 0o755)
             self.assertEqual(stat.S_IMODE(os.stat(library).st_mode), 0o644)
+            self.assertFalse(os.path.exists(os.path.join(system_dir, "lib")))
+            self.assertFalse(os.path.exists(os.path.join(system_dir, "bin", "arm")))
+            self.assertFalse(os.path.exists(os.path.join(
+                system_dir, "bin", "ndk_translation_program_runner_binfmt_misc")))
 
     def test_ndk_rejects_tampered_translation_library(self):
         with tempfile.TemporaryDirectory() as work_dir:
             installer = Ndk("12.0.0")
             source_root = os.path.join(work_dir, "source")
             library_path = os.path.join(
-                source_root, "prebuilts", "lib", "libndk_translation.so")
+                source_root, "prebuilts", "lib64", "libndk_translation.so")
             os.makedirs(os.path.dirname(library_path))
             with open(os.path.join(source_root, "README.md"), "w",
                       encoding="utf-8") as readme:

@@ -64,13 +64,14 @@ class Ndk(General):
 #     copy /system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register
 # """
 
-    def __init__(self, android_version):
+    def __init__(self, android_version, arm64_only=True):
         if android_version not in self.releases:
             raise ValueError(
                 "No available libndk translation for Android {}".format(
                     android_version))
 
         self.android_version = android_version
+        self.arm64_only = arm64_only
         self.release = self.releases[android_version]
         self.commit = self.release["commit"]
         self.dl_link = "https://codeload.github.com/{}/zip/{}".format(
@@ -94,6 +95,11 @@ class Ndk(General):
 
         prebuilt_dir = os.path.join(source_root, "prebuilts")
         library_hashes = self.release["library_sha256"]
+        if self.arm64_only:
+            library_hashes = {
+                path: checksum for path, checksum in library_hashes.items()
+                if path.startswith("lib64/")
+            }
         for relative_path, expected_sha256 in library_hashes.items():
             library_path = os.path.join(prebuilt_dir, relative_path)
             actual_sha256 = file_checksum(library_path, "sha256")
@@ -111,23 +117,27 @@ class Ndk(General):
                     "Missing NDK translation file: {}".format(required_path))
 
     def executable_files(self):
+        if self.arm64_only:
+            return self.android_12_executable_files
         if self.android_version.startswith("12.0.0"):
             return self.android_12_executable_files
         return self.all_executable_files
 
     def copy_paths(self):
+        if self.arm64_only or self.android_version.startswith("12.0.0"):
+            return (
+                "bin/arm64",
+                "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+                "etc/binfmt_misc/arm64_dyn",
+                "etc/binfmt_misc/arm64_exe",
+                "etc/cpuinfo.arm64.txt",
+                "etc/init/ndk_translation.rc",
+                "etc/ld.config.arm64.txt",
+                "lib64",
+            )
         if not self.android_version.startswith("12.0.0"):
             return (".",)
-        return (
-            "bin/arm64",
-            "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-            "etc/binfmt_misc/arm64_dyn",
-            "etc/binfmt_misc/arm64_exe",
-            "etc/cpuinfo.arm64.txt",
-            "etc/init/ndk_translation.rc",
-            "etc/ld.config.arm64.txt",
-            "lib64",
-        )
+        return ()
 
     def normalize_permissions(self, system_dir):
         # GitHub ZIP extraction does not reliably preserve executable bits.

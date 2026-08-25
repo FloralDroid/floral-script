@@ -90,9 +90,16 @@ Android 12 uses only the matching 64-bit translator and guest libraries from an
 Android 12 AVD. The Android 12 32-bit translator is excluded because this bundle
 does not provide a matching Android 12 32-bit guest image; install Houdini when
 32-bit ARM application support is required. The packaging script pins and
-verifies each source separately.
+verifies each source separately. NDK installation is ARM64-only for every
+supported Android version; the 32-bit path is owned by Houdini.
 
 libndk seems to have better performance than libhoudini on AMD.
+
+NDK and Houdini can be selected together. Their payloads retain the upstream
+`/system/lib*` layout because the guest runtimes use those paths internally.
+The packager removes each backend's private init/binfmt registration and emits
+one `/system/bin/floral_nativebridge_runner` registration layer, so Docker COPY
+order cannot replace one backend with the other.
 
 ```bash
 python redroid.py -a 12.0.0 \

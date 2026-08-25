@@ -8,6 +8,7 @@ from stuff.mindthegapps import MindTheGapps
 from stuff.ndk import Ndk
 from stuff.houdini import Houdini
 from stuff.houdini_hack import Houdini_Hack
+from stuff.general import General
 from stuff.widevine import Widevine
 import tools.helper as helper
 import subprocess
@@ -15,6 +16,7 @@ import subprocess
 
 def main():
     dockerfile = ""
+    translation_backends = []
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-a', '--android-version',
@@ -83,6 +85,7 @@ def main():
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
                 Ndk(args.android).install()
+                translation_backends.append("ndk")
                 dockerfile = dockerfile+"COPY ndk /\n"
         else:
             helper.print_color(
@@ -94,6 +97,7 @@ def main():
                 Houdini(args.android).install()
                 if not args.android == "8.1.0":
                     Houdini_Hack(args.android).install()
+                translation_backends.append("houdini")
                 dockerfile = dockerfile+"COPY houdini /\n"
         else:
             helper.print_color(
@@ -104,6 +108,9 @@ def main():
     if args.widevine:
         Widevine(args.android).install()
         dockerfile = dockerfile+"COPY widevine /\n"
+    if translation_backends:
+        General.finalize_nativebridge_installation(translation_backends)
+        dockerfile = dockerfile+"COPY nativebridge /\n"
     print("\nDockerfile\n"+dockerfile)
     with open("./Dockerfile", "w") as f:
         f.write(dockerfile)

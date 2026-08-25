@@ -36,6 +36,13 @@ class RedroidTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Android 13.0.0"):
             Ndk("13.0.0")
 
+    def test_ndk_install_is_arm64_only(self):
+        installer = Ndk("11.0.0")
+        self.assertIn("bin/arm64/app_process64", installer.executable_files())
+        self.assertNotIn("bin/arm/app_process", installer.executable_files())
+        self.assertIn("lib64", installer.copy_paths())
+        self.assertNotIn(".", installer.copy_paths())
+
     def test_general_extract_removes_stale_files(self):
         with tempfile.TemporaryDirectory() as work_dir:
             archive_path = os.path.join(work_dir, "archive.zip")
@@ -82,6 +89,41 @@ class RedroidTest(unittest.TestCase):
                 self.assertEqual(
                     init_file.read(),
                     "exec -- /system/bin/floral_nativebridge_runner\n")
+
+    def test_general_finalizes_one_translation_registration_layer(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            backend_dirs = []
+            for backend in ("ndk", "houdini"):
+                system_dir = os.path.join(work_dir, backend, "system")
+                binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
+                init_dir = os.path.join(system_dir, "etc", "init")
+                os.makedirs(binfmt_dir)
+                os.makedirs(init_dir)
+                for name in ("arm64_exe", "arm64_dyn"):
+                    with open(os.path.join(binfmt_dir, name), "w", encoding="utf-8") as registration:
+                        registration.write(
+                            ":{}:M::magic::/system/bin/floral_nativebridge_runner:P\n".format(name))
+                init_name = "ndk_translation.rc" if backend == "ndk" else "houdini.rc"
+                with open(os.path.join(init_dir, init_name), "w", encoding="utf-8"):
+                    pass
+                backend_dirs.append(os.path.join(work_dir, backend))
+
+            output_dir = os.path.join(work_dir, "nativebridge")
+            General.finalize_nativebridge_installation(backend_dirs, output_dir)
+
+            self.assertTrue(os.path.isfile(os.path.join(
+                output_dir, "system", "etc", "binfmt_misc", "arm64_exe")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                output_dir, "system", "etc", "init",
+                "floral-nativebridge-translation.rc")))
+            self.assertFalse(os.path.exists(os.path.join(
+                backend_dirs[0], "system", "etc", "binfmt_misc", "arm64_exe")))
+            self.assertFalse(os.path.exists(os.path.join(
+                backend_dirs[1], "system", "etc", "binfmt_misc", "arm64_exe")))
+            self.assertFalse(os.path.exists(os.path.join(
+                backend_dirs[0], "system", "etc", "init", "ndk_translation.rc")))
+            self.assertFalse(os.path.exists(os.path.join(
+                backend_dirs[1], "system", "etc", "init", "houdini.rc")))
 
     def test_ndk_copy_validates_files_and_normalizes_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:

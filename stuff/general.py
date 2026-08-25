@@ -93,6 +93,62 @@ class General:
                 with open(file_path, "w", encoding="utf-8") as init_file:
                     init_file.write(updated)
 
+    @classmethod
+    def finalize_nativebridge_installation(cls, backends, output_dir="./nativebridge"):
+        """Build one binfmt/init layer for all selected translation backends."""
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+
+        output_system = os.path.join(output_dir, "system")
+        output_binfmt = os.path.join(output_system, "etc", "binfmt_misc")
+        output_init = os.path.join(output_system, "etc", "init")
+        os.makedirs(output_binfmt, exist_ok=True)
+        os.makedirs(output_init, exist_ok=True)
+
+        registration_names = (
+            "arm_exe",
+            "arm_dyn",
+            "arm64_exe",
+            "arm64_dyn",
+        )
+        available = set()
+        for backend in backends:
+            system_dir = os.path.join(backend, "system")
+            binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
+            for name in registration_names:
+                source = os.path.join(binfmt_dir, name)
+                if not os.path.isfile(source):
+                    continue
+                destination = os.path.join(output_binfmt, name)
+                if name not in available:
+                    shutil.copy2(source, destination)
+                    available.add(name)
+                os.remove(source)
+
+            init_dir = os.path.join(system_dir, "etc", "init")
+            for name in ("ndk_translation.rc", "houdini.rc"):
+                init_path = os.path.join(init_dir, name)
+                if os.path.isfile(init_path):
+                    os.remove(init_path)
+
+        lines = [
+            "on early-init",
+            "    mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc",
+            "",
+            "on post-fs-data",
+        ]
+        for name in registration_names:
+            if name in available:
+                lines.append(
+                    "    copy /system/etc/binfmt_misc/{} "
+                    "/proc/sys/fs/binfmt_misc/register".format(name))
+        lines.append("")
+        with open(
+                os.path.join(output_init, "floral-nativebridge-translation.rc"),
+                "w",
+                encoding="utf-8") as init_file:
+            init_file.write("\n".join(lines))
+
     def install(self):
         # pass
         self.download()

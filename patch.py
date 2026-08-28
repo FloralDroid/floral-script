@@ -34,11 +34,11 @@ def main():
                         required=True)
     parser.add_argument('-g', '--install-gapps',
                         dest='gapps',
-                        help='Install OpenGapps to ReDroid',
+                        help='Install OpenGapps to FloralDroid',
                         action='store_true')
     parser.add_argument('-lg', '--install-litegapps',
                         dest='litegapps',
-                        help='Install LiteGapps to ReDroid',
+                        help='Install LiteGapps to FloralDroid',
                         action='store_true')
     parser.add_argument('-n', '--install-ndk-translation',
                         dest='ndk',
@@ -50,7 +50,7 @@ def main():
                         action='store_true')
     parser.add_argument('-mtg', '--install-mindthegapps',
                         dest='mindthegapps',
-                        help='Install MindTheGapps to ReDroid',
+                        help='Install MindTheGapps to FloralDroid',
                         action='store_true')
     parser.add_argument('-m', '--install-magisk', dest='magisk',
                         help='Install Magisk ( Bootless )',
@@ -65,8 +65,10 @@ def main():
                         choices=['docker', 'podman'])
 
     args = parser.parse_args()
+    payload_android = "12.0.0" if args.android == "12.0.0_64only" else args.android
     # FROM preserves custom image configuration, including Floral's entrypoint
     # and any default arguments configured by the selected base image.
+
     dockerfile = dockerfile + "FROM {}\n".format(args.base_image)
     if args.gapps:
         if args.android in ["11.0.0"]:
@@ -84,24 +86,25 @@ def main():
         if args.android in ["11.0.0", "12.0.0", "12.0.0_64only"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
-                Ndk(args.android).install()
+                Ndk(payload_android).install()
                 translation_backends.append("ndk")
-                dockerfile = dockerfile+"COPY ndk /\n"
         else:
             helper.print_color(
-                "WARNING: Libndk seems to work only on redroid:11.0.0 or redroid:12.0.0", helper.bcolors.YELLOW)
+                "WARNING: NDK Translation is only validated for FloralDroid Android 11/12",
+                helper.bcolors.YELLOW)
     if args.houdini:
-        if args.android in ["8.1.0", "9.0.0", "11.0.0", "12.0.0", "13.0.0", "14.0.0"]:
+        if args.android in ["8.1.0", "9.0.0", "11.0.0", "12.0.0", "12.0.0_64only",
+                            "13.0.0", "14.0.0"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
-                Houdini(args.android).install()
-                if not args.android == "8.1.0":
-                    Houdini_Hack(args.android).install()
+                Houdini(payload_android).install()
+                if not payload_android == "8.1.0":
+                    Houdini_Hack(payload_android).install()
                 translation_backends.append("houdini")
-                dockerfile = dockerfile+"COPY houdini /\n"
         else:
             helper.print_color(
-                "WARNING: Houdini seems to work only above redroid:11.0.0", helper.bcolors.YELLOW)
+                "WARNING: Houdini is only validated for FloralDroid Android 11/12/13/14",
+                helper.bcolors.YELLOW)
     if args.magisk:
         Magisk().install()
         dockerfile = dockerfile+"COPY magisk /\n"

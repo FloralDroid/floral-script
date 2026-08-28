@@ -90,7 +90,7 @@ class RedroidTest(unittest.TestCase):
                     init_file.read(),
                     "exec -- /system/bin/floral_nativebridge_runner\n")
 
-    def test_general_finalizes_one_translation_registration_layer(self):
+    def test_general_finalizes_isolated_translation_roots(self):
         with tempfile.TemporaryDirectory() as work_dir:
             backend_dirs = []
             for backend in ("ndk", "houdini"):
@@ -106,6 +106,14 @@ class RedroidTest(unittest.TestCase):
                 init_name = "ndk_translation.rc" if backend == "ndk" else "houdini.rc"
                 with open(os.path.join(init_dir, init_name), "w", encoding="utf-8"):
                     pass
+                if backend == "houdini":
+                    for name in ("ld_config.patch", "ld_config_swcodec.patch"):
+                        with open(os.path.join(system_dir, "etc", name), "w", encoding="utf-8"):
+                            pass
+                guest_library = os.path.join(system_dir, "lib64", "arm64", "libc.so")
+                os.makedirs(os.path.dirname(guest_library), exist_ok=True)
+                with open(guest_library, "w", encoding="utf-8") as library:
+                    library.write(backend)
                 backend_dirs.append(os.path.join(work_dir, backend))
 
             output_dir = os.path.join(work_dir, "nativebridge")
@@ -116,14 +124,36 @@ class RedroidTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(
                 output_dir, "system", "etc", "init",
                 "floral-nativebridge-translation.rc")))
-            self.assertFalse(os.path.exists(os.path.join(
-                backend_dirs[0], "system", "etc", "binfmt_misc", "arm64_exe")))
-            self.assertFalse(os.path.exists(os.path.join(
-                backend_dirs[1], "system", "etc", "binfmt_misc", "arm64_exe")))
-            self.assertFalse(os.path.exists(os.path.join(
-                backend_dirs[0], "system", "etc", "init", "ndk_translation.rc")))
-            self.assertFalse(os.path.exists(os.path.join(
-                backend_dirs[1], "system", "etc", "init", "houdini.rc")))
+            for relative_path in (
+                    "bin/arm",
+                    "bin/arm64",
+                    "lib/arm",
+                    "lib64/arm64"):
+                self.assertTrue(os.path.isdir(os.path.join(
+                    output_dir, "system", relative_path)))
+            for relative_path in (
+                    "etc/cpuinfo.arm.txt",
+                    "etc/cpuinfo.arm64.txt",
+                    "etc/ld.config.arm.txt",
+                    "etc/ld.config.arm64.txt"):
+                target = os.path.join(output_dir, "system", relative_path)
+                self.assertTrue(os.path.isfile(target))
+                self.assertEqual(os.path.getsize(target), 0)
+            for backend in ("ndk", "houdini"):
+                isolated = os.path.join(output_dir, "system", "floral", backend)
+                self.assertTrue(os.path.isdir(isolated))
+                self.assertFalse(os.path.exists(os.path.join(
+                    isolated, "etc", "binfmt_misc", "arm64_exe")))
+                self.assertFalse(os.path.exists(os.path.join(
+                    isolated, "etc", "init", "{}.rc".format(
+                        "ndk_translation" if backend == "ndk" else "houdini"))))
+                self.assertFalse(os.path.exists(os.path.join(
+                    isolated, "etc", "ld_config.patch")))
+                self.assertFalse(os.path.exists(os.path.join(
+                    isolated, "etc", "ld_config_swcodec.patch")))
+                with open(os.path.join(
+                        isolated, "lib64", "arm64", "libc.so"), encoding="utf-8") as library:
+                    self.assertEqual(library.read(), backend)
 
     def test_ndk_copy_validates_files_and_normalizes_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:
@@ -213,7 +243,7 @@ class RedroidTest(unittest.TestCase):
             installer.copy_dir = os.path.join(work_dir, "copy")
             archive_root = os.path.join(
                 installer.extract_to,
-                "vendor_intel_proprietary_houdini-debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8",
+                "vendor_intel_proprietary_houdini-0e0164611d5fe5595229854759c30a9b5c1199a5",
                 "prebuilts",
             )
             for relative_path in (
@@ -402,6 +432,46 @@ class RedroidTest(unittest.TestCase):
             check=True,
         )
 
+    def test_combined_nativebridge_backends_share_one_docker_layer(self):
+        arguments = [
+            "redroid.py",
+            "-a",
+            "12.0.0",
+            "-b",
+            "floral:12.0.0",
+            "-o",
+            "floral:12.0.0-both",
+            "-n",
+            "-i",
+        ]
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            original_dir = os.getcwd()
+            with patch.object(sys, "argv", arguments), \
+                    patch("patch.Ndk") as ndk, \
+                    patch("patch.Houdini") as houdini, \
+                    patch("patch.Houdini_Hack") as hack, \
+                    patch("patch.General.finalize_nativebridge_installation") as finalize, \
+                    patch("patch.helper.host", return_value=("x86_64", 64)), \
+                    patch("patch.subprocess.run"), \
+                    patch("builtins.print"):
+                os.chdir(work_dir)
+                try:
+                    redroid.main()
+                finally:
+                    os.chdir(original_dir)
+
+            with open(os.path.join(work_dir, "Dockerfile"), encoding="utf-8") as dockerfile:
+                dockerfile = dockerfile.read()
+            self.assertIn("COPY nativebridge /\n", dockerfile)
+            self.assertNotIn("COPY ndk /\n", dockerfile)
+            self.assertNotIn("COPY houdini /\n", dockerfile)
+
+        finalize.assert_called_once_with(["ndk", "houdini"])
+        ndk.return_value.install.assert_called_once_with()
+        houdini.return_value.install.assert_called_once_with()
+        hack.return_value.install.assert_called_once_with()
+
     def test_ndk_build_passes_selected_android_version(self):
         arguments = [
             "redroid.py",
@@ -418,6 +488,7 @@ class RedroidTest(unittest.TestCase):
             original_dir = os.getcwd()
             with patch.object(sys, "argv", arguments), \
                     patch("patch.Ndk") as ndk, \
+                    patch("patch.General.finalize_nativebridge_installation"), \
                     patch("patch.helper.host", return_value=("x86_64", 64)), \
                     patch("patch.subprocess.run"), \
                     patch("builtins.print"):
@@ -429,6 +500,72 @@ class RedroidTest(unittest.TestCase):
 
         ndk.assert_called_once_with("12.0.0")
         ndk.return_value.install.assert_called_once_with()
+
+    def test_houdini_build_passes_selected_android_version(self):
+        arguments = [
+            "redroid.py",
+            "-a",
+            "12.0.0",
+            "-b",
+            "floral:12.0.0",
+            "-o",
+            "floral:12.0.0-houdini",
+            "-i",
+        ]
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            original_dir = os.getcwd()
+            with patch.object(sys, "argv", arguments), \
+                    patch("patch.Houdini") as houdini, \
+                    patch("patch.Houdini_Hack") as hack, \
+                    patch("patch.General.finalize_nativebridge_installation"), \
+                    patch("patch.helper.host", return_value=("x86_64", 64)), \
+                    patch("patch.subprocess.run"), \
+                    patch("builtins.print"):
+                os.chdir(work_dir)
+                try:
+                    redroid.main()
+                finally:
+                    os.chdir(original_dir)
+
+        houdini.assert_called_once_with("12.0.0")
+        houdini.return_value.install.assert_called_once_with()
+        hack.assert_called_once_with("12.0.0")
+        hack.return_value.install.assert_called_once_with()
+
+    def test_64only_translation_installs_both_12_payloads(self):
+        arguments = [
+            "redroid.py",
+            "-a",
+            "12.0.0_64only",
+            "-b",
+            "floral:12.0.0_64only",
+            "-o",
+            "floral:12.0.0_64only-translation",
+            "-n",
+            "-i",
+        ]
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            original_dir = os.getcwd()
+            with patch.object(sys, "argv", arguments), \
+                    patch("patch.Ndk") as ndk, \
+                    patch("patch.Houdini") as houdini, \
+                    patch("patch.Houdini_Hack") as hack, \
+                    patch("patch.General.finalize_nativebridge_installation") as finalize, \
+                    patch("patch.helper.host", return_value=("x86_64", 64)), \
+                    patch("patch.subprocess.run"), \
+                    patch("builtins.print"):
+                os.chdir(work_dir)
+                try:
+                    redroid.main()
+                finally:
+                    os.chdir(original_dir)
+
+        ndk.assert_called_once_with("12.0.0")
+        houdini.assert_called_once_with("12.0.0")
+        hack.assert_called_once_with("12.0.0")
+        finalize.assert_called_once_with(["ndk", "houdini"])
 
 
 if __name__ == "__main__":

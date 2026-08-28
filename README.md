@@ -1,7 +1,7 @@
-# Remote-Android Script
+# FloralDroid Image Script
 
-This script adds Gapps, Magisk and libndk to redroid **without recompiling the entire image**
-If redroid-script doesn't work, please create an issue
+This script adds optional packages and translation backends to FloralDroid
+without recompiling the entire image.
 
 ## Dependencies
 - lzip
@@ -18,15 +18,6 @@ python redroid.py \
     -b floral:12.0.0 \
     -o floral:12.0.0-magisk \
     -m
-```
-
-Upstream ReDroid images remain supported when selected explicitly:
-
-```bash
-python redroid.py \
-    -a 12.0.0 \
-    -b redroid/redroid:12.0.0-latest \
-    -o redroid/redroid:12.0.0-custom
 ```
 
 ## Specify container type
@@ -47,33 +38,33 @@ versions. It must match the selected base image. The value can be `8.1.0`,
 `14.0.0`. The default is `11.0.0`.
 
 ```bash
-# pull the latest image
-python redroid.py -a 11.0.0 \
-    -b redroid/redroid:11.0.0-latest \
-    -o redroid/redroid:11.0.0-custom
+# build from a FloralDroid base image
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-custom
 ```
 
-## Add OpenGapps to ReDroid image
+## Add OpenGapps to FloralDroid image
 
 <img src="./assets/3.png" style="zoom:50%;" />
 
 ```bash
-python redroid.py -a 11.0.0 \
-    -b redroid/redroid:11.0.0-latest \
-    -o redroid/redroid:11.0.0-gapps \
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-gapps \
     -g
 ```
 
-## Add liteGapps to ReDroid image
+## Add liteGapps to FloralDroid image
 
 ```bash
-python redroid.py -a 11.0.0 \
-    -b redroid/redroid:11.0.0-latest \
-    -o redroid/redroid:11.0.0-litegapps \
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-litegapps \
     -lg
 ```
 
-## Add MindTheGapps to ReDroid image
+## Add MindTheGapps to FloralDroid image
 
 ```bash
 python redroid.py -a 12.0.0 \
@@ -82,7 +73,7 @@ python redroid.py -a 12.0.0 \
     -mtg
 ```
 
-## Add libndk arm translation to ReDroid image
+## Add ARM translation backends to FloralDroid image
 <img src="./assets/2.png" style="zoom:50%;" />
 
 Android 11 uses libndk_translation from the Guybrush Android 11 firmware.
@@ -95,20 +86,22 @@ supported Android version; the 32-bit path is owned by Houdini.
 
 libndk seems to have better performance than libhoudini on AMD.
 
-NDK and Houdini can be selected together. Their payloads retain the upstream
-`/system/lib*` layout because the guest runtimes use those paths internally.
-The packager removes each backend's private init/binfmt registration and emits
-one `/system/bin/floral_nativebridge_runner` registration layer, so Docker COPY
-order cannot replace one backend with the other.
+NDK Translation and Houdini can be selected together. The packager stores them
+below `/system/floral/ndk` and `/system/floral/houdini`, removes each backend's
+private init/binfmt registration, and emits one
+`/system/bin/floral_nativebridge_runner` registration layer. FloralDroid then
+bind-mounts only the selected backend's guest sysroot into each translated
+process namespace, so Docker COPY order cannot replace one backend with the
+other.
 
 ```bash
 python redroid.py -a 12.0.0 \
     -b floral:12.0.0 \
-    -o floral:12.0.0-ndk \
-    -n
+    -o floral:12.0.0-translation \
+    -n -i
 ```
 
-## Add Magisk to ReDroid image
+## Add Magisk to FloralDroid image
 <img src="./assets/1.png" style="zoom:50%;" />
 
 Zygisk and modules like LSPosed should work. 
@@ -122,7 +115,7 @@ python redroid.py -a 12.0.0 \
     -m
 ```
 
-## Add widevine DRM(L3) to ReDroid image
+## Add widevine DRM(L3) to FloralDroid image
 
 ![](assets/4.png)
 
@@ -137,13 +130,14 @@ python redroid.py -a 12.0.0 \
 
 ## Example
 
-This command will add Gapps, Magisk, Libndk, Widevine to the ReDroid image at the same time.
+This command will add Gapps, both ARM translation backends, Magisk and Widevine
+to the FloralDroid image at the same time.
 
 ```bash
-python redroid.py -a 11.0.0 \
-    -b redroid/redroid:11.0.0-latest \
-    -o redroid/redroid:11.0.0-gapps-ndk-magisk-widevine \
-    -gmnw
+python redroid.py -a 12.0.0 \
+    -b floral:12.0.0 \
+    -o floral:12.0.0-gapps-translation-magisk-widevine \
+    -gmnwi
 ```
 
 Then start the docker container.
@@ -152,7 +146,7 @@ Then start the docker container.
 docker run -itd --rm --privileged \
     -v ~/data:/data \
     -p 5555:5555 \
-    redroid/redroid:11.0.0-gapps-ndk-magisk-widevine \
+    floral:12.0.0-gapps-translation-magisk-widevine \
 ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
     ro.product.cpu.abilist64=x86_64,arm64-v8a \
     ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi \
@@ -161,23 +155,23 @@ ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
     ro.enable.native.bridge.exec=1 \
     ro.vendor.enable.native.bridge.exec=1 \
     ro.vendor.enable.native.bridge.exec64=1 \
-    ro.dalvik.vm.native.bridge=libndk_translation.so \
-    ro.ndk_translation.version=0.2.3 \
+    ro.dalvik.vm.native.bridge=libmixbridge.so \
+    ro.floral.nativebridge.default_backend=auto \
 ```
 
-If you need to use libndk on `redroid:12.0.0_64only` image, you should start the container with the following command
+If you need a 64-bit-only FloralDroid image, start the container with the following command.
 
 ```bash
 docker run -itd --rm --privileged \
     -v ~/data12:/data \
     -p 5555:5555 \
-    redroid/redroid:12.0.0_64only-ndk \
+    floral:12.0.0-translation \
     androidboot.use_memfd=1 \
     ro.product.cpu.abilist=x86_64,arm64-v8a \
     ro.product.cpu.abilist64=x86_64,arm64-v8a \
     ro.dalvik.vm.isa.arm64=x86_64 \
     ro.enable.native.bridge.exec=1 \
-    ro.dalvik.vm.native.bridge=libndk_translation.so
+    ro.dalvik.vm.native.bridge=libmixbridge.so
 ```
 
 ## Troubleshooting
@@ -196,16 +190,11 @@ docker run -itd --rm --privileged \
 
     2. Grab device id and register on this website: https://www.google.com/android/uncertified/
 
-- libndk doesn't work
+- ARM translation doesn't work
   
-    Use an image built with the same `-a` Android version as its base image.
-    Android 11 and Android 12 use different translation libraries. Turning on
-    Zygisk may still break libndk for 32-bit apps, while ARM64 apps can continue
-    to work.
-    
-- libhoudini doesn't work
-  
-    I have no idea. I can't get any version of libhoudini to work on redroid.
+    Use a FloralDroid image built with the same `-a` Android version as its base
+    image. Android 11 and Android 12 use different translation libraries.
+    Android 12 NDK Translation is ARM64-only; ARM32 processes use Houdini.
 
 
 ## Credits

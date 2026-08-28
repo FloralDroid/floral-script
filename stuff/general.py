@@ -95,15 +95,34 @@ class General:
 
     @classmethod
     def finalize_nativebridge_installation(cls, backends, output_dir="./nativebridge"):
-        """Build one binfmt/init layer for all selected translation backends."""
+        """Stage selected translation backends below one isolated system root."""
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
 
         output_system = os.path.join(output_dir, "system")
+        output_backends = os.path.join(output_system, "floral")
         output_binfmt = os.path.join(output_system, "etc", "binfmt_misc")
         output_init = os.path.join(output_system, "etc", "init")
         os.makedirs(output_binfmt, exist_ok=True)
         os.makedirs(output_init, exist_ok=True)
+        os.makedirs(output_backends, exist_ok=True)
+
+        # Zygote bind-mounts the selected payload over these paths after
+        # /system is read-only, so every possible target must exist in the
+        # image before boot.
+        for relative_path in (
+                "bin/arm",
+                "bin/arm64",
+                "lib/arm",
+                "lib64/arm64"):
+            os.makedirs(os.path.join(output_system, relative_path), exist_ok=True)
+        for relative_path in (
+                "etc/cpuinfo.arm.txt",
+                "etc/cpuinfo.arm64.txt",
+                "etc/ld.config.arm.txt",
+                "etc/ld.config.arm64.txt"):
+            with open(os.path.join(output_system, relative_path), "w", encoding="utf-8"):
+                pass
 
         registration_names = (
             "arm_exe",
@@ -113,7 +132,17 @@ class General:
         )
         available = set()
         for backend in backends:
-            system_dir = os.path.join(backend, "system")
+            backend_name = os.path.basename(os.path.normpath(backend))
+            if backend_name not in ("ndk", "houdini"):
+                raise ValueError("Unknown native bridge backend: {}".format(backend_name))
+            source_system = os.path.join(backend, "system")
+            if not os.path.isdir(source_system):
+                raise FileNotFoundError(
+                    "Missing native bridge backend payload: {}".format(source_system))
+
+            system_dir = os.path.join(output_backends, backend_name)
+            shutil.copytree(source_system, system_dir, dirs_exist_ok=True)
+            cls.route_binfmt_to(system_dir, "/system/bin/floral_nativebridge_runner")
             binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
             for name in registration_names:
                 source = os.path.join(binfmt_dir, name)
@@ -130,6 +159,19 @@ class General:
                 init_path = os.path.join(init_dir, name)
                 if os.path.isfile(init_path):
                     os.remove(init_path)
+
+            # Linker paths are generated from system/linkerconfig; the payload
+            # patches are tied to one generated file layout and become stale.
+            for name in ("ld_config.patch", "ld_config_swcodec.patch"):
+                patch_path = os.path.join(system_dir, "etc", name)
+                if os.path.isfile(patch_path):
+                    os.remove(patch_path)
+
+            # This is a complete base init script from the Houdini archive,
+            # not a backend-specific init fragment.
+            backend_init = os.path.join(init_dir, "hw", "init.rc")
+            if os.path.isfile(backend_init):
+                os.remove(backend_init)
 
         lines = [
             "on early-init",

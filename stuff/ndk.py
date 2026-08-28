@@ -48,8 +48,6 @@ class Ndk(General):
         "bin/ndk_translation_program_runner_binfmt_misc_arm64",
     )
     android_12_executable_files = (
-        "bin/arm64/app_process64",
-        "bin/arm64/linker64",
         "bin/ndk_translation_program_runner_binfmt_misc_arm64",
     )
 #     init_rc_component = """
@@ -107,6 +105,9 @@ class Ndk(General):
                 raise ValueError(
                     "SHA-256 mismatch for {}: expected {}, got {}".format(
                         relative_path, expected_sha256, actual_sha256))
+            machine = (
+                "X86-64" if relative_path.startswith("lib64/") else "80386")
+            self.validate_elf(library_path, machine)
 
         required_files = self.executable_files() + (
             "etc/init/ndk_translation.rc",)
@@ -126,14 +127,11 @@ class Ndk(General):
     def copy_paths(self):
         if self.arm64_only or self.android_version.startswith("12.0.0"):
             return (
-                "bin/arm64",
                 "bin/ndk_translation_program_runner_binfmt_misc_arm64",
                 "etc/binfmt_misc/arm64_dyn",
                 "etc/binfmt_misc/arm64_exe",
-                "etc/cpuinfo.arm64.txt",
                 "etc/init/ndk_translation.rc",
-                "etc/ld.config.arm64.txt",
-                "lib64",
+                "lib64/libndk_translation.so",
             )
         if not self.android_version.startswith("12.0.0"):
             return (".",)

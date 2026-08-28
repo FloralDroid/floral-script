@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 import zipfile
 
 from tools.helper import bcolors, download_file, file_checksum, print_color
@@ -55,6 +56,50 @@ class General:
 
     def copy(self):
         pass
+
+    @staticmethod
+    def validate_elf(file_path, machine, android_api=None):
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError("Missing ELF file: {}".format(file_path))
+
+        environment = os.environ.copy()
+        environment["LC_ALL"] = "C"
+        try:
+            header = subprocess.run(
+                ["readelf", "--file-header", file_path],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=environment,
+            ).stdout
+        except FileNotFoundError as error:
+            raise RuntimeError("readelf is required to validate payloads") from error
+        except subprocess.CalledProcessError as error:
+            raise ValueError("Cannot read ELF file: {}".format(file_path)) from error
+
+        if not any(
+                line.startswith("  Machine:") and machine in line
+                for line in header.splitlines()):
+            raise ValueError(
+                "Unexpected ELF machine for {}: expected {}".format(
+                    file_path, machine))
+
+        if android_api is None:
+            return
+        notes = subprocess.run(
+            ["readelf", "--notes", file_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environment,
+        ).stdout
+        api_bytes = "{:02x} 00 00 00".format(android_api)
+        if "description data: {}".format(api_bytes) not in notes:
+            raise ValueError(
+                "Unexpected Android API for {}: expected {}".format(
+                    file_path, android_api))
 
     @classmethod
     def route_binfmt_to(cls, system_dir, interpreter):
@@ -118,9 +163,7 @@ class General:
             os.makedirs(os.path.join(output_system, relative_path), exist_ok=True)
         for relative_path in (
                 "etc/cpuinfo.arm.txt",
-                "etc/cpuinfo.arm64.txt",
-                "etc/ld.config.arm.txt",
-                "etc/ld.config.arm64.txt"):
+                "etc/cpuinfo.arm64.txt"):
             with open(os.path.join(output_system, relative_path), "w", encoding="utf-8"):
                 pass
 
@@ -139,6 +182,17 @@ class General:
             if not os.path.isdir(source_system):
                 raise FileNotFoundError(
                     "Missing native bridge backend payload: {}".format(source_system))
+
+            if backend_name == "ndk":
+                for relative_path in (
+                        "bin/arm64",
+                        "lib64/arm64",
+                        "etc/ld.config.arm64.txt"):
+                    forbidden = os.path.join(source_system, relative_path)
+                    if os.path.exists(forbidden):
+                        raise ValueError(
+                            "NDK payload must not contain AOSP guest userspace: "
+                            "{}".format(forbidden))
 
             system_dir = os.path.join(output_backends, backend_name)
             shutil.copytree(source_system, system_dir, dirs_exist_ok=True)

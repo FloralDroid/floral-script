@@ -77,22 +77,23 @@ python redroid.py -a 12.0.0 \
 <img src="./assets/2.png" style="zoom:50%;" />
 
 Android 11 uses libndk_translation from the Guybrush Android 11 firmware.
-Android 12 uses only the matching 64-bit translator and guest libraries from an
-Android 12 AVD. The Android 12 32-bit translator is excluded because this bundle
-does not provide a matching Android 12 32-bit guest image; install Houdini when
-32-bit ARM application support is required. The packaging script pins and
-verifies each source separately. NDK installation is ARM64-only for every
-supported Android version; the 32-bit path is owned by Houdini.
+Android 12 uses only the matching 64-bit translator from an Android 12 AVD. Its
+ARM64 guest userspace comes from the FloralDroid AOSP build, so the packager
+rejects AVD guest libraries, binaries, and linker configuration in the NDK
+payload. Install Houdini when 32-bit ARM application support is required. The
+packaging script pins and verifies each source separately. NDK installation is
+ARM64-only for every supported Android version; the 32-bit path is owned by
+Houdini.
 
 libndk seems to have better performance than libhoudini on AMD.
 
 NDK Translation and Houdini can be selected together. The packager stores them
 below `/system/floral/ndk` and `/system/floral/houdini`, removes each backend's
 private init/binfmt registration, and emits one
-`/system/bin/floral_nativebridge_runner` registration layer. FloralDroid then
-bind-mounts only the selected backend's guest sysroot into each translated
-process namespace, so Docker COPY order cannot replace one backend with the
-other.
+`/system/bin/floral_nativebridge_runner` registration layer. NDK uses the AOSP
+guest userspace already present in the image; FloralDroid bind-mounts Houdini's
+complete private guest sysroot only for Houdini processes. Docker COPY order
+therefore cannot replace one backend with the other.
 
 ```bash
 python redroid.py -a 12.0.0 \

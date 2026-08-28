@@ -98,7 +98,7 @@ def main():
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
                 Houdini(payload_android).install()
-                if not payload_android == "8.1.0":
+                if payload_android not in ("8.1.0", "12.0.0"):
                     Houdini_Hack(payload_android).install()
                 translation_backends.append("houdini")
         else:

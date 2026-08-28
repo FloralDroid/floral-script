@@ -7,7 +7,7 @@ import tempfile
 import unittest
 import zipfile
 from contextlib import redirect_stderr
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import patch as redroid
 from stuff.general import General
@@ -38,9 +38,14 @@ class RedroidTest(unittest.TestCase):
 
     def test_ndk_install_is_arm64_only(self):
         installer = Ndk("11.0.0")
-        self.assertIn("bin/arm64/app_process64", installer.executable_files())
+        self.assertIn(
+            "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+            installer.executable_files())
         self.assertNotIn("bin/arm/app_process", installer.executable_files())
-        self.assertIn("lib64", installer.copy_paths())
+        self.assertIn("lib64/libndk_translation.so", installer.copy_paths())
+        self.assertNotIn("bin/arm64", installer.copy_paths())
+        self.assertNotIn("lib64", installer.copy_paths())
+        self.assertNotIn("etc/ld.config.arm64.txt", installer.copy_paths())
         self.assertNotIn(".", installer.copy_paths())
 
     def test_general_extract_removes_stale_files(self):
@@ -60,6 +65,27 @@ class RedroidTest(unittest.TestCase):
 
             self.assertFalse(os.path.exists(os.path.join(extract_dir, "stale")))
             self.assertTrue(os.path.isfile(os.path.join(extract_dir, "current")))
+
+    def test_general_validates_elf_machine_and_android_api(self):
+        with tempfile.NamedTemporaryFile() as elf_file, \
+                patch("stuff.general.subprocess.run") as readelf:
+            readelf.side_effect = [
+                Mock(stdout="  Machine: AArch64\n"),
+                Mock(stdout="   description data: 1f 00 00 00 \n"),
+            ]
+
+            General.validate_elf(
+                elf_file.name, "AArch64", android_api=31)
+
+        self.assertEqual(readelf.call_count, 2)
+
+    def test_general_rejects_wrong_elf_machine(self):
+        with tempfile.NamedTemporaryFile() as elf_file, \
+                patch("stuff.general.subprocess.run") as readelf:
+            readelf.return_value.stdout = "  Machine: AArch64\n"
+
+            with self.assertRaisesRegex(ValueError, "Unexpected ELF machine"):
+                General.validate_elf(elf_file.name, "X86-64")
 
     def test_general_routes_binfmt_and_init_to_dispatcher(self):
         with tempfile.TemporaryDirectory() as system_dir:
@@ -110,10 +136,20 @@ class RedroidTest(unittest.TestCase):
                     for name in ("ld_config.patch", "ld_config_swcodec.patch"):
                         with open(os.path.join(system_dir, "etc", name), "w", encoding="utf-8"):
                             pass
-                guest_library = os.path.join(system_dir, "lib64", "arm64", "libc.so")
-                os.makedirs(os.path.dirname(guest_library), exist_ok=True)
-                with open(guest_library, "w", encoding="utf-8") as library:
-                    library.write(backend)
+                if backend == "houdini":
+                    for relative_path in (
+                            "lib64/arm64/libc.so",
+                            "lib64/arm64/nb/libc.so"):
+                        guest_library = os.path.join(system_dir, relative_path)
+                        os.makedirs(os.path.dirname(guest_library), exist_ok=True)
+                        with open(guest_library, "w", encoding="utf-8") as library:
+                            library.write(relative_path)
+                else:
+                    translator = os.path.join(
+                        system_dir, "lib64", "libndk_translation.so")
+                    os.makedirs(os.path.dirname(translator), exist_ok=True)
+                    with open(translator, "w", encoding="utf-8") as library:
+                        library.write(backend)
                 backend_dirs.append(os.path.join(work_dir, backend))
 
             output_dir = os.path.join(work_dir, "nativebridge")
@@ -133,12 +169,15 @@ class RedroidTest(unittest.TestCase):
                     output_dir, "system", relative_path)))
             for relative_path in (
                     "etc/cpuinfo.arm.txt",
-                    "etc/cpuinfo.arm64.txt",
-                    "etc/ld.config.arm.txt",
-                    "etc/ld.config.arm64.txt"):
+                    "etc/cpuinfo.arm64.txt"):
                 target = os.path.join(output_dir, "system", relative_path)
                 self.assertTrue(os.path.isfile(target))
                 self.assertEqual(os.path.getsize(target), 0)
+            for relative_path in (
+                    "etc/ld.config.arm.txt",
+                    "etc/ld.config.arm64.txt"):
+                self.assertFalse(os.path.exists(os.path.join(
+                    output_dir, "system", relative_path)))
             for backend in ("ndk", "houdini"):
                 isolated = os.path.join(output_dir, "system", "floral", backend)
                 self.assertTrue(os.path.isdir(isolated))
@@ -151,9 +190,31 @@ class RedroidTest(unittest.TestCase):
                     isolated, "etc", "ld_config.patch")))
                 self.assertFalse(os.path.exists(os.path.join(
                     isolated, "etc", "ld_config_swcodec.patch")))
-                with open(os.path.join(
-                        isolated, "lib64", "arm64", "libc.so"), encoding="utf-8") as library:
-                    self.assertEqual(library.read(), backend)
+            ndk_root = os.path.join(
+                output_dir, "system", "floral", "ndk")
+            self.assertTrue(os.path.isfile(os.path.join(
+                ndk_root, "lib64", "libndk_translation.so")))
+            self.assertFalse(os.path.exists(os.path.join(
+                ndk_root, "lib64", "arm64")))
+            houdini_root = os.path.join(
+                output_dir, "system", "floral", "houdini")
+            for relative_path in (
+                    "lib64/arm64/libc.so",
+                    "lib64/arm64/nb/libc.so"):
+                self.assertTrue(os.path.isfile(os.path.join(
+                    houdini_root, relative_path)))
+
+    def test_general_rejects_ndk_guest_userspace(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            ndk_root = os.path.join(work_dir, "ndk")
+            guest_root = os.path.join(
+                ndk_root, "system", "lib64", "arm64")
+            os.makedirs(guest_root)
+
+            with self.assertRaisesRegex(
+                    ValueError, "NDK payload must not contain"):
+                General.finalize_nativebridge_installation(
+                    [ndk_root], os.path.join(work_dir, "nativebridge"))
 
     def test_ndk_copy_validates_files_and_normalizes_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:
@@ -192,7 +253,7 @@ class RedroidTest(unittest.TestCase):
             for relative_path in installer.copy_paths():
                 if (relative_path == "." or
                         relative_path in installer.executable_files() or
-                        os.path.isdir(os.path.join(prebuilt_dir, relative_path))):
+                        os.path.exists(os.path.join(prebuilt_dir, relative_path))):
                     continue
                 file_path = os.path.join(prebuilt_dir, relative_path)
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -208,7 +269,8 @@ class RedroidTest(unittest.TestCase):
                     else:
                         copied_file.write(b"copied")
 
-            installer.copy()
+            with patch.object(installer, "validate_elf") as validate_elf:
+                installer.copy()
 
             system_dir = os.path.join(installer.copy_dir, "system")
             executable = os.path.join(system_dir, installer.executable_files()[0])
@@ -219,6 +281,16 @@ class RedroidTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(system_dir, "bin", "arm")))
             self.assertFalse(os.path.exists(os.path.join(
                 system_dir, "bin", "ndk_translation_program_runner_binfmt_misc")))
+            self.assertFalse(os.path.exists(os.path.join(
+                system_dir, "bin", "arm64")))
+            self.assertFalse(os.path.exists(os.path.join(
+                system_dir, "lib64", "arm64")))
+            self.assertFalse(os.path.exists(os.path.join(
+                system_dir, "etc", "ld.config.arm64.txt")))
+            validate_elf.assert_called_once_with(
+                os.path.join(
+                    prebuilt_dir, "lib64", "libndk_translation.so"),
+                "X86-64")
 
     def test_ndk_rejects_tampered_translation_library(self):
         with tempfile.TemporaryDirectory() as work_dir:
@@ -251,6 +323,9 @@ class RedroidTest(unittest.TestCase):
                     "bin/houdini64",
                     "lib/arm/libc.so",
                     "lib64/arm64/libc.so",
+                    "lib64/arm64/nb/libc.so",
+                    "lib64/arm64/nb/libm.so",
+                    "lib64/arm64/nb/libdl.so",
                     "lib/libhoudini.so",
                     "lib64/libhoudini.so",
                     "etc/binfmt_misc/arm64_exe",
@@ -265,7 +340,8 @@ class RedroidTest(unittest.TestCase):
                         payload.write(b"payload")
                 os.chmod(file_path, 0o600)
 
-            installer.copy()
+            with patch.object(installer, "validate_elf") as validate_elf:
+                installer.copy()
 
             system_dir = os.path.join(installer.copy_dir, "system")
             for relative_path in (
@@ -288,6 +364,17 @@ class RedroidTest(unittest.TestCase):
                     os.stat(os.path.join(system_dir, "lib", "arm")).st_mode),
                 0o755,
             )
+            self.assertEqual(validate_elf.call_count, 3)
+            validate_elf.assert_any_call(
+                os.path.join(archive_root, "lib64", "libhoudini.so"),
+                "X86-64")
+            validate_elf.assert_any_call(
+                os.path.join(archive_root, "lib64", "arm64", "libc.so"),
+                "AArch64", android_api=31)
+            validate_elf.assert_any_call(
+                os.path.join(
+                    archive_root, "lib64", "arm64", "nb", "libc.so"),
+                "AArch64", android_api=31)
 
     def test_houdini_hack_normalizes_only_overlay_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:
@@ -470,7 +557,7 @@ class RedroidTest(unittest.TestCase):
         finalize.assert_called_once_with(["ndk", "houdini"])
         ndk.return_value.install.assert_called_once_with()
         houdini.return_value.install.assert_called_once_with()
-        hack.return_value.install.assert_called_once_with()
+        hack.return_value.install.assert_not_called()
 
     def test_ndk_build_passes_selected_android_version(self):
         arguments = [
@@ -530,8 +617,7 @@ class RedroidTest(unittest.TestCase):
 
         houdini.assert_called_once_with("12.0.0")
         houdini.return_value.install.assert_called_once_with()
-        hack.assert_called_once_with("12.0.0")
-        hack.return_value.install.assert_called_once_with()
+        hack.assert_not_called()
 
     def test_64only_translation_installs_both_12_payloads(self):
         arguments = [
@@ -564,7 +650,7 @@ class RedroidTest(unittest.TestCase):
 
         ndk.assert_called_once_with("12.0.0")
         houdini.assert_called_once_with("12.0.0")
-        hack.assert_called_once_with("12.0.0")
+        hack.assert_not_called()
         finalize.assert_called_once_with(["ndk", "houdini"])
 
 

@@ -96,12 +96,30 @@ on property:sys.boot_completed=1
         print_color("Copying libhoudini library files ...", bcolors.GREEN)
         name = re.findall(r"([a-zA-Z0-9]+)\.zip", self.dl_link)[0]
         system_dir = os.path.join(self.copy_dir, "system")
+        source_dir = os.path.join(
+            self.extract_to,
+            "vendor_intel_proprietary_houdini-" + name,
+            "prebuilts",
+        )
+        if self.version == "12.0.0":
+            self.validate_elf(
+                os.path.join(source_dir, "lib64", "libhoudini.so"),
+                "X86-64")
+            for relative_path in (
+                    "lib64/arm64/libc.so",
+                    "lib64/arm64/nb/libc.so"):
+                self.validate_elf(
+                    os.path.join(source_dir, relative_path),
+                    "AArch64", android_api=31)
+            for relative_path in (
+                    "lib64/arm64/nb/libm.so",
+                    "lib64/arm64/nb/libdl.so"):
+                if not os.path.isfile(os.path.join(source_dir, relative_path)):
+                    raise FileNotFoundError(
+                        "Incomplete Houdini ARM64 nb sysroot: {}".format(
+                            relative_path))
         shutil.copytree(
-            os.path.join(
-                self.extract_to,
-                "vendor_intel_proprietary_houdini-" + name,
-                "prebuilts",
-            ),
+            source_dir,
             system_dir,
             dirs_exist_ok=True,
         )

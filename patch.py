@@ -114,6 +114,9 @@ def main():
     if translation_backends:
         General.finalize_nativebridge_installation(translation_backends)
         dockerfile = dockerfile+"COPY nativebridge /\n"
+        # The Android base image may not contain a shell.  The finalizer
+        # removes legacy hack files before this payload is staged, so no
+        # in-image cleanup step is required.
     print("\nDockerfile\n"+dockerfile)
     with open("./Dockerfile", "w") as f:
         f.write(dockerfile)

@@ -77,23 +77,24 @@ python redroid.py -a 12.0.0 \
 <img src="./assets/2.png" style="zoom:50%;" />
 
 Android 11 uses libndk_translation from the Guybrush Android 11 firmware.
-Android 12 uses only the matching 64-bit translator from an Android 12 AVD. Its
-ARM64 guest userspace comes from the FloralDroid AOSP build, so the packager
-rejects AVD guest libraries, binaries, and linker configuration in the NDK
-payload. Install Houdini when 32-bit ARM application support is required. The
-packaging script pins and verifies each source separately. NDK installation is
-ARM64-only for every supported Android version; the 32-bit path is owned by
-Houdini.
+Android 12 uses the pinned `libndk_translation-12.0.0.tar` from
+`zhouziyang/libndk_translation`. The archive supplies the NDK host translator,
+proxy libraries, runner, and `libnb.so` symlink. Its guest ELF files are
+validated but not installed: the AOSP native-bridge guest sysroot remains the
+owner of `/system/lib64/arm64` and its exported guest libc symbols. Install
+Houdini when 32-bit ARM application support is required. The packaging script
+pins and verifies each source separately. NDK installation is ARM64-only for
+every supported Android version; the 32-bit path is owned by Houdini.
 
 libndk seems to have better performance than libhoudini on AMD.
 
-NDK Translation and Houdini can be selected together. The packager stores them
-below `/system/floral/ndk` and `/system/floral/houdini`, removes each backend's
-private init/binfmt registration, and emits one
-`/system/bin/floral_nativebridge_runner` registration layer. NDK uses the AOSP
-guest userspace already present in the image; FloralDroid bind-mounts Houdini's
-complete private guest sysroot only for Houdini processes. Docker COPY order
-therefore cannot replace one backend with the other.
+NDK Translation and Houdini can be selected together. The packager installs
+NDK host files at their canonical `/system` paths, keeps the NDK linker config
+under `/system/floral/ndk`, and stores Houdini below
+`/system/floral/houdini`. Backend init/binfmt registrations are removed and
+one `/system/bin/floral_nativebridge_runner` registration layer is emitted.
+FloralDroid exposes only the selected backend's guest namespace to each app;
+Docker COPY order cannot replace the AOSP guest libc with a translator payload.
 
 ```bash
 python redroid.py -a 12.0.0 \
@@ -157,7 +158,7 @@ ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
     ro.vendor.enable.native.bridge.exec=1 \
     ro.vendor.enable.native.bridge.exec64=1 \
     ro.dalvik.vm.native.bridge=libmixbridge.so \
-    ro.floral.nativebridge.default_backend=auto \
+    ro.floral.nb.default_backend=auto \
 ```
 
 If you need a 64-bit-only FloralDroid image, start the container with the following command.

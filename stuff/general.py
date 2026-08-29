@@ -1,5 +1,6 @@
 
 
+import glob
 import os
 import shutil
 import subprocess
@@ -140,7 +141,7 @@ class General:
 
     @classmethod
     def finalize_nativebridge_installation(cls, backends, output_dir="./nativebridge"):
-        """Stage selected translation backends below one isolated system root."""
+        """Stage selected translation backends below the image system root."""
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
 
@@ -174,6 +175,16 @@ class General:
             "arm64_dyn",
         )
         available = set()
+
+        def copy_payload_file(source_path, target_path):
+            if not os.path.lexists(source_path):
+                return False
+            if os.path.islink(source_path) and not os.path.exists(source_path):
+                return False
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            shutil.copy2(source_path, target_path, follow_symlinks=False)
+            return True
+
         for backend in backends:
             backend_name = os.path.basename(os.path.normpath(backend))
             if backend_name not in ("ndk", "houdini"):
@@ -184,32 +195,101 @@ class General:
                     "Missing native bridge backend payload: {}".format(source_system))
 
             if backend_name == "ndk":
+                # NDK Translation's upstream archive contains an ARM guest
+                # tree, but AOSP native_bridge_support owns the installed
+                # guest libc and linker. Stage only host-side NDK files at
+                # their canonical paths and keep its linker config private.
                 for relative_path in (
+                        "bin/arm",
                         "bin/arm64",
+                        "lib/arm",
                         "lib64/arm64"):
-                    forbidden = os.path.join(source_system, relative_path)
-                    if os.path.exists(forbidden):
+                    guest_root = os.path.join(source_system, relative_path)
+                    if os.path.lexists(guest_root):
                         raise ValueError(
                             "NDK payload must not contain AOSP guest userspace: "
-                            "{}".format(forbidden))
+                            "{}".format(guest_root))
+                host_paths = (
+                    "bin/ndk_translation_program_runner_binfmt_misc",
+                    "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+                    "lib/libndk_translation.so",
+                    "lib64/libndk_translation.so",
+                    "lib/libnb.so",
+                    "lib64/libnb.so",
+                )
+                required_host_paths = (
+                    "bin/ndk_translation_program_runner_binfmt_misc_arm64",
+                    "lib64/libndk_translation.so",
+                )
+                for relative_path in host_paths:
+                    copied = copy_payload_file(
+                        os.path.join(source_system, relative_path),
+                        os.path.join(output_system, relative_path))
+                    if relative_path in required_host_paths and not copied:
+                        raise FileNotFoundError(
+                            "Missing required NDK host file: {}".format(
+                                os.path.join(source_system, relative_path)))
+
+                proxy_paths = sorted(glob.glob(os.path.join(
+                    source_system, "lib64/libndk_translation_proxy_*.so")))
+                if not proxy_paths:
+                    raise FileNotFoundError(
+                        "Missing NDK translation proxy libraries in {}".format(
+                            os.path.join(source_system, "lib64")))
+                for source_path in proxy_paths:
+                    copy_payload_file(
+                        source_path,
+                        os.path.join(output_system, "lib64",
+                                     os.path.basename(source_path)))
+
+                private_dir = os.path.join(output_backends, "ndk")
                 config_path = os.path.join(
                     source_system, "etc", "ld.config.arm64.txt")
-                if not os.path.isfile(config_path):
+                if not copy_payload_file(
+                        config_path,
+                        os.path.join(private_dir, "etc",
+                                     "ld.config.arm64.txt")):
                     raise FileNotFoundError(
-                        "Missing NDK guest linker config: {}".format(config_path))
+                        "Missing required NDK linker config: {}".format(
+                            config_path))
+
+                private_binfmt_dir = os.path.join(
+                    private_dir, "etc", "binfmt_misc")
+                required_registrations = {"arm64_exe", "arm64_dyn"}
+                copied_registrations = set()
+                for name in registration_names:
+                    source = os.path.join(source_system, "etc", "binfmt_misc", name)
+                    if os.path.isfile(source):
+                        runner = ("bin/ndk_translation_program_runner"
+                                  if name in ("arm_exe", "arm_dyn") else
+                                  "bin/ndk_translation_program_runner_binfmt_misc_arm64")
+                        if not os.path.exists(os.path.join(
+                                source_system, runner)):
+                            continue
+                        if copy_payload_file(
+                                source, os.path.join(private_binfmt_dir, name)):
+                            copied_registrations.add(name)
+                missing_registrations = required_registrations - copied_registrations
+                if missing_registrations:
+                    raise FileNotFoundError(
+                        "Missing required NDK binfmt registrations: {}".format(
+                            ", ".join(sorted(missing_registrations))))
+                cls.route_binfmt_to(
+                    private_dir, "/system/bin/floral_nativebridge_runner")
+                for name in registration_names:
+                    source = os.path.join(private_binfmt_dir, name)
+                    if not os.path.isfile(source):
+                        continue
+                    destination = os.path.join(output_binfmt, name)
+                    if name not in available:
+                        shutil.copy2(source, destination)
+                        available.add(name)
+                    os.remove(source)
+                continue
 
             system_dir = os.path.join(output_backends, backend_name)
-            shutil.copytree(source_system, system_dir, dirs_exist_ok=True)
-            if backend_name == "ndk":
-                # The AOSP guest linker reads its architecture-specific config
-                # from /system/etc, while NDK's private guest sysroot is not
-                # mounted at runtime.
-                config_path = os.path.join(
-                    system_dir, "etc", "ld.config.arm64.txt")
-                shutil.copy2(
-                    config_path,
-                    os.path.join(output_system, "etc", "ld.config.arm64.txt"))
-                os.remove(config_path)
+            shutil.copytree(source_system, system_dir, symlinks=True,
+                            dirs_exist_ok=True)
             cls.route_binfmt_to(system_dir, "/system/bin/floral_nativebridge_runner")
             binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
             for name in registration_names:

@@ -28,7 +28,16 @@ class RedroidTest(unittest.TestCase):
             "9324a8914b649b885dad6f2bfd14a67e5d1520bf")
         self.assertEqual(
             android_12.commit,
-            "181d9290a69309511185c4417ba3d890b3caaaa8")
+            "c2093bd678eb493ea0f918e01ab76c0695a54c3c")
+        self.assertEqual(
+            android_12.dl_link,
+            "https://raw.githubusercontent.com/zhouziyang/"
+            "libndk_translation/c2093bd678eb493ea0f918e01ab76c0695a54c3c/"
+            "libndk_translation-12.0.0.tar")
+        self.assertEqual(android_12.source_format, "tar")
+        self.assertNotIn(".", android_12.copy_paths())
+        self.assertIn("lib64/libndk_translation.so", android_12.copy_paths())
+        self.assertIn("lib64/libnb.so", android_12.copy_paths())
         self.assertEqual(android_12.release, android_12_64only.release)
         self.assertNotEqual(android_11.dl_file_name, android_12.dl_file_name)
 
@@ -116,7 +125,7 @@ class RedroidTest(unittest.TestCase):
                     init_file.read(),
                     "exec -- /system/bin/floral_nativebridge_runner\n")
 
-    def test_general_finalizes_isolated_translation_roots(self):
+    def test_general_finalizes_ndk_host_and_isolates_houdini(self):
         with tempfile.TemporaryDirectory() as work_dir:
             backend_dirs = []
             for backend in ("ndk", "houdini"):
@@ -157,6 +166,18 @@ class RedroidTest(unittest.TestCase):
                         config.write(
                             "namespace.default.search.paths = "
                             "/system/${LIB}/arm64\n")
+                    proxy = os.path.join(
+                        system_dir, "lib64",
+                        "libndk_translation_proxy_libc.so")
+                    os.makedirs(os.path.dirname(proxy), exist_ok=True)
+                    with open(proxy, "w", encoding="utf-8"):
+                        pass
+                    runner = os.path.join(
+                        system_dir, "bin",
+                        "ndk_translation_program_runner_binfmt_misc_arm64")
+                    os.makedirs(os.path.dirname(runner), exist_ok=True)
+                    with open(runner, "w", encoding="utf-8"):
+                        pass
                 backend_dirs.append(os.path.join(work_dir, backend))
 
             output_dir = os.path.join(work_dir, "nativebridge")
@@ -183,31 +204,29 @@ class RedroidTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(
                 output_dir, "system", "etc", "ld.config.arm.txt")))
             guest_config = os.path.join(
-                output_dir, "system", "etc", "ld.config.arm64.txt")
+                output_dir, "system", "floral", "ndk", "etc",
+                "ld.config.arm64.txt")
             self.assertTrue(os.path.isfile(guest_config))
             with open(guest_config, encoding="utf-8") as config:
                 self.assertIn("/system/${LIB}/arm64", config.read())
-            for backend in ("ndk", "houdini"):
-                isolated = os.path.join(output_dir, "system", "floral", backend)
-                self.assertTrue(os.path.isdir(isolated))
-                self.assertFalse(os.path.exists(os.path.join(
-                    isolated, "etc", "binfmt_misc", "arm64_exe")))
-                self.assertFalse(os.path.exists(os.path.join(
-                    isolated, "etc", "init", "{}.rc".format(
-                        "ndk_translation" if backend == "ndk" else "houdini"))))
-                self.assertFalse(os.path.exists(os.path.join(
-                    isolated, "etc", "ld_config.patch")))
-                self.assertFalse(os.path.exists(os.path.join(
-                    isolated, "etc", "ld_config_swcodec.patch")))
-                if backend == "ndk":
-                    self.assertFalse(os.path.exists(os.path.join(
-                        isolated, "etc", "ld.config.arm64.txt")))
-            ndk_root = os.path.join(
-                output_dir, "system", "floral", "ndk")
+            ndk_root = os.path.join(output_dir, "system")
             self.assertTrue(os.path.isfile(os.path.join(
                 ndk_root, "lib64", "libndk_translation.so")))
-            self.assertFalse(os.path.exists(os.path.join(
+            self.assertTrue(os.path.isfile(os.path.join(
+                ndk_root, "lib64", "libndk_translation_proxy_libc.so")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                ndk_root, "bin",
+                "ndk_translation_program_runner_binfmt_misc_arm64")))
+            self.assertTrue(os.path.isdir(os.path.join(
                 ndk_root, "lib64", "arm64")))
+            self.assertFalse(os.path.exists(os.path.join(
+                ndk_root, "lib64", "arm64", "linker64")))
+            self.assertFalse(os.path.exists(os.path.join(
+                ndk_root, "etc", "init", "ndk_translation.rc")))
+            self.assertFalse(os.path.exists(os.path.join(
+                ndk_root, "etc", "ld_config.patch")))
+            self.assertFalse(os.path.exists(os.path.join(
+                ndk_root, "etc", "ld_config_swcodec.patch")))
             houdini_root = os.path.join(
                 output_dir, "system", "floral", "houdini")
             for relative_path in (
@@ -222,29 +241,27 @@ class RedroidTest(unittest.TestCase):
             guest_root = os.path.join(
                 ndk_root, "system", "lib64", "arm64")
             os.makedirs(guest_root)
+            config = os.path.join(ndk_root, "system", "etc",
+                                  "ld.config.arm64.txt")
+            os.makedirs(os.path.dirname(config), exist_ok=True)
+            with open(config, "w", encoding="utf-8") as config_file:
+                config_file.write("namespace.default.search.paths=/system/lib64/arm64\n")
 
-            with self.assertRaisesRegex(
-                    ValueError, "NDK payload must not contain"):
-                General.finalize_nativebridge_installation(
-                    [ndk_root], os.path.join(work_dir, "nativebridge"))
+            output_dir = os.path.join(work_dir, "nativebridge")
+            with self.assertRaisesRegex(ValueError, "AOSP guest userspace"):
+                General.finalize_nativebridge_installation([ndk_root], output_dir)
 
     def test_ndk_copy_validates_files_and_normalizes_permissions(self):
         with tempfile.TemporaryDirectory() as work_dir:
             installer = Ndk("12.0.0")
             installer.extract_to = os.path.join(work_dir, "extract")
-            installer.archive_root = "source"
             installer.copy_dir = os.path.join(work_dir, "copy")
-            source_root = os.path.join(installer.extract_to, "source")
-            prebuilt_dir = os.path.join(source_root, "prebuilts")
-            os.makedirs(prebuilt_dir)
-
-            readme_path = os.path.join(source_root, "README.md")
-            with open(readme_path, "w", encoding="utf-8") as readme:
-                readme.write(installer.release["fingerprint"])
+            source_root = os.path.join(installer.extract_to, "system")
+            os.makedirs(source_root)
 
             library_hashes = {}
             for relative_path in installer.release["library_sha256"]:
-                file_path = os.path.join(prebuilt_dir, relative_path)
+                file_path = os.path.join(source_root, relative_path)
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 contents = relative_path.encode("utf-8")
                 with open(file_path, "wb") as library:
@@ -254,33 +271,33 @@ class RedroidTest(unittest.TestCase):
             installer.release = dict(installer.release)
             installer.release["library_sha256"] = library_hashes
 
-            for relative_path in installer.executable_files() + (
-                    "etc/init/ndk_translation.rc",
-                    "etc/ld.config.arm64.txt"):
-                file_path = os.path.join(prebuilt_dir, relative_path)
+            required_files = installer.executable_files() + (
+                "lib64/arm64/libc.so",
+                "lib64/arm64/libdl.so",
+                "lib64/arm64/libm.so",
+                "etc/init/ndk_translation.rc",
+                "etc/ld.config.arm64.txt",
+                "etc/binfmt_misc/arm64_dyn",
+                "etc/binfmt_misc/arm64_exe",
+                "lib64/libndk_translation_proxy_libc.so",
+            )
+            for relative_path in required_files:
+                file_path = os.path.join(source_root, relative_path)
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, "wb") as required_file:
-                    required_file.write(b"required")
-                os.chmod(file_path, 0o600)
-
-            for relative_path in installer.copy_paths():
-                if (relative_path == "." or
-                        relative_path in installer.executable_files() or
-                        os.path.exists(os.path.join(prebuilt_dir, relative_path))):
-                    continue
-                file_path = os.path.join(prebuilt_dir, relative_path)
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, "wb") as copied_file:
-                    if relative_path.endswith("arm64_exe"):
-                        copied_file.write(
-                            b":arm64_exe:M::magic::/system/bin/"
-                            b"ndk_translation_program_runner_binfmt_misc_arm64:P\n")
-                    elif relative_path.endswith("arm64_dyn"):
-                        copied_file.write(
-                            b":arm64_dyn:M::magic::/system/bin/"
+                    if relative_path.startswith("etc/binfmt_misc/"):
+                        required_file.write(
+                            b":arm64:M::magic::/system/bin/"
                             b"ndk_translation_program_runner_binfmt_misc_arm64:P\n")
                     else:
-                        copied_file.write(b"copied")
+                        required_file.write(b"required")
+                os.chmod(file_path, 0o600)
+            for relative_path, target in (
+                    ("lib64/libnb.so", "libndk_translation.so"),
+                    ("lib/libnb.so", "libndk_translation.so")):
+                link_path = os.path.join(source_root, relative_path)
+                os.makedirs(os.path.dirname(link_path), exist_ok=True)
+                os.symlink(target, link_path)
 
             with patch.object(installer, "validate_elf") as validate_elf:
                 installer.copy()
@@ -291,30 +308,27 @@ class RedroidTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(os.stat(executable).st_mode), 0o755)
             self.assertEqual(stat.S_IMODE(os.stat(library).st_mode), 0o644)
             self.assertFalse(os.path.exists(os.path.join(system_dir, "lib")))
-            self.assertFalse(os.path.exists(os.path.join(system_dir, "bin", "arm")))
-            self.assertFalse(os.path.exists(os.path.join(
-                system_dir, "bin", "ndk_translation_program_runner_binfmt_misc")))
-            self.assertFalse(os.path.exists(os.path.join(
-                system_dir, "bin", "arm64")))
+            self.assertFalse(os.path.exists(os.path.join(system_dir, "bin", "arm64")))
             self.assertFalse(os.path.exists(os.path.join(
                 system_dir, "lib64", "arm64")))
+            self.assertEqual(
+                os.readlink(os.path.join(system_dir, "lib64", "libnb.so")),
+                "libndk_translation.so")
+            self.assertTrue(os.path.isfile(os.path.join(
+                system_dir, "lib64", "libndk_translation_proxy_libc.so")))
             self.assertTrue(os.path.isfile(os.path.join(
                 system_dir, "etc", "ld.config.arm64.txt")))
-            validate_elf.assert_called_once_with(
-                os.path.join(
-                    prebuilt_dir, "lib64", "libndk_translation.so"),
-                "X86-64")
+            validate_elf.assert_any_call(
+                os.path.join(source_root, "lib64", "libndk_translation.so"),
+                "X86-64", android_api=31)
 
     def test_ndk_rejects_tampered_translation_library(self):
         with tempfile.TemporaryDirectory() as work_dir:
             installer = Ndk("12.0.0")
-            source_root = os.path.join(work_dir, "source")
+            source_root = os.path.join(work_dir, "system")
             library_path = os.path.join(
-                source_root, "prebuilts", "lib64", "libndk_translation.so")
+                source_root, "lib64", "libndk_translation.so")
             os.makedirs(os.path.dirname(library_path))
-            with open(os.path.join(source_root, "README.md"), "w",
-                      encoding="utf-8") as readme:
-                readme.write(installer.release["fingerprint"])
             with open(library_path, "wb") as library:
                 library.write(b"tampered")
 
@@ -564,6 +578,8 @@ class RedroidTest(unittest.TestCase):
             with open(os.path.join(work_dir, "Dockerfile"), encoding="utf-8") as dockerfile:
                 dockerfile = dockerfile.read()
             self.assertIn("COPY nativebridge /\n", dockerfile)
+            self.assertNotIn("RUN ", dockerfile)
+            self.assertNotIn("ld_config.patch", dockerfile)
             self.assertNotIn("COPY ndk /\n", dockerfile)
             self.assertNotIn("COPY houdini /\n", dockerfile)
 

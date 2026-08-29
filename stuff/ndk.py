@@ -111,6 +111,8 @@ class Ndk(General):
 
         required_files = self.executable_files() + (
             "etc/init/ndk_translation.rc",)
+        if self.arm64_only or self.android_version.startswith("12.0.0"):
+            required_files += ("etc/ld.config.arm64.txt",)
         for relative_path in required_files:
             required_path = os.path.join(prebuilt_dir, relative_path)
             if not os.path.isfile(required_path):
@@ -131,6 +133,7 @@ class Ndk(General):
                 "etc/binfmt_misc/arm64_dyn",
                 "etc/binfmt_misc/arm64_exe",
                 "etc/init/ndk_translation.rc",
+                "etc/ld.config.arm64.txt",
                 "lib64/libndk_translation.so",
             )
         if not self.android_version.startswith("12.0.0"):

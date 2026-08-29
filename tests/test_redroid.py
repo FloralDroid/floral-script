@@ -45,7 +45,7 @@ class RedroidTest(unittest.TestCase):
         self.assertIn("lib64/libndk_translation.so", installer.copy_paths())
         self.assertNotIn("bin/arm64", installer.copy_paths())
         self.assertNotIn("lib64", installer.copy_paths())
-        self.assertNotIn("etc/ld.config.arm64.txt", installer.copy_paths())
+        self.assertIn("etc/ld.config.arm64.txt", installer.copy_paths())
         self.assertNotIn(".", installer.copy_paths())
 
     def test_general_extract_removes_stale_files(self):
@@ -150,6 +150,13 @@ class RedroidTest(unittest.TestCase):
                     os.makedirs(os.path.dirname(translator), exist_ok=True)
                     with open(translator, "w", encoding="utf-8") as library:
                         library.write(backend)
+                    with open(
+                            os.path.join(system_dir, "etc",
+                                         "ld.config.arm64.txt"),
+                            "w", encoding="utf-8") as config:
+                        config.write(
+                            "namespace.default.search.paths = "
+                            "/system/${LIB}/arm64\n")
                 backend_dirs.append(os.path.join(work_dir, backend))
 
             output_dir = os.path.join(work_dir, "nativebridge")
@@ -173,11 +180,13 @@ class RedroidTest(unittest.TestCase):
                 target = os.path.join(output_dir, "system", relative_path)
                 self.assertTrue(os.path.isfile(target))
                 self.assertEqual(os.path.getsize(target), 0)
-            for relative_path in (
-                    "etc/ld.config.arm.txt",
-                    "etc/ld.config.arm64.txt"):
-                self.assertFalse(os.path.exists(os.path.join(
-                    output_dir, "system", relative_path)))
+            self.assertFalse(os.path.exists(os.path.join(
+                output_dir, "system", "etc", "ld.config.arm.txt")))
+            guest_config = os.path.join(
+                output_dir, "system", "etc", "ld.config.arm64.txt")
+            self.assertTrue(os.path.isfile(guest_config))
+            with open(guest_config, encoding="utf-8") as config:
+                self.assertIn("/system/${LIB}/arm64", config.read())
             for backend in ("ndk", "houdini"):
                 isolated = os.path.join(output_dir, "system", "floral", backend)
                 self.assertTrue(os.path.isdir(isolated))
@@ -190,6 +199,9 @@ class RedroidTest(unittest.TestCase):
                     isolated, "etc", "ld_config.patch")))
                 self.assertFalse(os.path.exists(os.path.join(
                     isolated, "etc", "ld_config_swcodec.patch")))
+                if backend == "ndk":
+                    self.assertFalse(os.path.exists(os.path.join(
+                        isolated, "etc", "ld.config.arm64.txt")))
             ndk_root = os.path.join(
                 output_dir, "system", "floral", "ndk")
             self.assertTrue(os.path.isfile(os.path.join(
@@ -243,7 +255,8 @@ class RedroidTest(unittest.TestCase):
             installer.release["library_sha256"] = library_hashes
 
             for relative_path in installer.executable_files() + (
-                    "etc/init/ndk_translation.rc",):
+                    "etc/init/ndk_translation.rc",
+                    "etc/ld.config.arm64.txt"):
                 file_path = os.path.join(prebuilt_dir, relative_path)
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, "wb") as required_file:
@@ -285,7 +298,7 @@ class RedroidTest(unittest.TestCase):
                 system_dir, "bin", "arm64")))
             self.assertFalse(os.path.exists(os.path.join(
                 system_dir, "lib64", "arm64")))
-            self.assertFalse(os.path.exists(os.path.join(
+            self.assertTrue(os.path.isfile(os.path.join(
                 system_dir, "etc", "ld.config.arm64.txt")))
             validate_elf.assert_called_once_with(
                 os.path.join(

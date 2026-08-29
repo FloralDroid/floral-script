@@ -186,16 +186,30 @@ class General:
             if backend_name == "ndk":
                 for relative_path in (
                         "bin/arm64",
-                        "lib64/arm64",
-                        "etc/ld.config.arm64.txt"):
+                        "lib64/arm64"):
                     forbidden = os.path.join(source_system, relative_path)
                     if os.path.exists(forbidden):
                         raise ValueError(
                             "NDK payload must not contain AOSP guest userspace: "
                             "{}".format(forbidden))
+                config_path = os.path.join(
+                    source_system, "etc", "ld.config.arm64.txt")
+                if not os.path.isfile(config_path):
+                    raise FileNotFoundError(
+                        "Missing NDK guest linker config: {}".format(config_path))
 
             system_dir = os.path.join(output_backends, backend_name)
             shutil.copytree(source_system, system_dir, dirs_exist_ok=True)
+            if backend_name == "ndk":
+                # The AOSP guest linker reads its architecture-specific config
+                # from /system/etc, while NDK's private guest sysroot is not
+                # mounted at runtime.
+                config_path = os.path.join(
+                    system_dir, "etc", "ld.config.arm64.txt")
+                shutil.copy2(
+                    config_path,
+                    os.path.join(output_system, "etc", "ld.config.arm64.txt"))
+                os.remove(config_path)
             cls.route_binfmt_to(system_dir, "/system/bin/floral_nativebridge_runner")
             binfmt_dir = os.path.join(system_dir, "etc", "binfmt_misc")
             for name in registration_names:

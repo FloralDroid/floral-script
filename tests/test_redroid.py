@@ -119,7 +119,7 @@ class RedroidTest(unittest.TestCase):
             installer.copy_dir = os.path.join(work_dir, "copy")
             archive_root = os.path.join(
                 installer.extract_to,
-                "vendor_intel_proprietary_houdini-debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8",
+                "vendor_intel_proprietary_houdini-0e0164611d5fe5595229854759c30a9b5c1199a5",
                 "prebuilts",
             )
             for relative_path in (

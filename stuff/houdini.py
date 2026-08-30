@@ -45,8 +45,8 @@ on property:sys.boot_completed=1
             "https://github.com/rote66/vendor_intel_proprietary_houdini/archive/debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8.zip",
             "cb7ffac26d47ec7c89df43818e126b47"],
         "12.0.0": [
-            "https://github.com/supremegamers/vendor_intel_proprietary_houdini/archive/0e0164611d5fe5595229854759c30a9b5c1199a5.zip",
-            "9709701b44b6ab7fc311c7dc95945bd0"],
+            "https://github.com/rote66/vendor_intel_proprietary_houdini/archive/debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8.zip",
+            "cb7ffac26d47ec7c89df43818e126b47"],
         "13.0.0": [
             "https://github.com/rote66/vendor_intel_proprietary_houdini/archive/debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8.zip",
             "cb7ffac26d47ec7c89df43818e126b47"],
@@ -96,30 +96,12 @@ on property:sys.boot_completed=1
         print_color("Copying libhoudini library files ...", bcolors.GREEN)
         name = re.findall(r"([a-zA-Z0-9]+)\.zip", self.dl_link)[0]
         system_dir = os.path.join(self.copy_dir, "system")
-        source_dir = os.path.join(
-            self.extract_to,
-            "vendor_intel_proprietary_houdini-" + name,
-            "prebuilts",
-        )
-        if self.version == "12.0.0":
-            self.validate_elf(
-                os.path.join(source_dir, "lib64", "libhoudini.so"),
-                "X86-64")
-            for relative_path in (
-                    "lib64/arm64/libc.so",
-                    "lib64/arm64/nb/libc.so"):
-                self.validate_elf(
-                    os.path.join(source_dir, relative_path),
-                    "AArch64", android_api=31)
-            for relative_path in (
-                    "lib64/arm64/nb/libm.so",
-                    "lib64/arm64/nb/libdl.so"):
-                if not os.path.isfile(os.path.join(source_dir, relative_path)):
-                    raise FileNotFoundError(
-                        "Incomplete Houdini ARM64 nb sysroot: {}".format(
-                            relative_path))
         shutil.copytree(
-            source_dir,
+            os.path.join(
+                self.extract_to,
+                "vendor_intel_proprietary_houdini-" + name,
+                "prebuilts",
+            ),
             system_dir,
             dirs_exist_ok=True,
         )
@@ -130,8 +112,4 @@ on property:sys.boot_completed=1
         with open(init_path, "w") as initfile:
             initfile.write(self.init_rc_component)
         self.normalize_permissions(system_dir)
-        if self.version == "12.0.0":
-            self.route_binfmt_to(
-                system_dir,
-                "/system/bin/floral_nativebridge_runner")
         os.chmod(init_path, 0o644)

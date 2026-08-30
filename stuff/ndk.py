@@ -1,7 +1,5 @@
-import glob
 import os
 import shutil
-import tarfile
 from stuff.general import General
 from tools.helper import bcolors, file_checksum, get_download_dir, print_color
 
@@ -25,16 +23,17 @@ class Ndk(General):
         },
     }
     android_12_release = {
-        "commit": "c2093bd678eb493ea0f918e01ab76c0695a54c3c",
-        "source_url": (
-            "https://raw.githubusercontent.com/zhouziyang/"
-            "libndk_translation/c2093bd678eb493ea0f918e01ab76c0695a54c3c/"
-            "libndk_translation-12.0.0.tar"),
+        "commit": "181d9290a69309511185c4417ba3d890b3caaaa8",
         "archive_sha256": (
-            "5764ba796aeb14a52ac9150d1a11d1a0a8889cf42591f54bac9b8aa3ac99efa6"),
+            "0911fb251773671c245433db5c729f125170137b5b863c576919cd0ccd052f69"),
+        "fingerprint": (
+            "google/sdk_gphone64_x86_64/emulator64_x86_64_arm64:12/"
+            "S2B2.211203.006/8015633:user/dev-keys"),
         "library_sha256": {
+            "lib/libndk_translation.so": (
+                "0323ac82b5f6a986be2ae20400cff9b54252b8ba557c2562def2c2e283de2687"),
             "lib64/libndk_translation.so": (
-                "c05f2b7ef51d3c855576ae53c25f7511d0490695ca1bf6b16269627be6dbdb51"),
+                "46432c5ce6aae55c0191c198573780d52ffbbd518dfcbd8ccf262545e39823a6"),
         },
     }
     releases = {
@@ -42,27 +41,13 @@ class Ndk(General):
         "12.0.0": android_12_release,
         "12.0.0_64only": android_12_release,
     }
-    all_executable_files = (
+    executable_files = (
         "bin/arm/app_process",
         "bin/arm/linker",
         "bin/arm64/app_process64",
         "bin/arm64/linker64",
         "bin/ndk_translation_program_runner_binfmt_misc",
         "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-    )
-    android_12_executable_files = (
-        "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-    )
-    android_12_tar_host_executable_files = (
-        "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-    )
-    android_12_tar_host_copy_paths = (
-        "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-        "etc/binfmt_misc/arm64_dyn",
-        "etc/binfmt_misc/arm64_exe",
-        "etc/ld.config.arm64.txt",
-        "lib64/libndk_translation.so",
-        "lib64/libnb.so",
     )
 #     init_rc_component = """
 # # Enable native bridge for target executables
@@ -76,37 +61,27 @@ class Ndk(General):
 #     copy /system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register
 # """
 
-    def __init__(self, android_version, arm64_only=True):
+    def __init__(self, android_version):
         if android_version not in self.releases:
             raise ValueError(
                 "No available libndk translation for Android {}".format(
                     android_version))
 
         self.android_version = android_version
-        self.arm64_only = arm64_only
         self.release = self.releases[android_version]
         self.commit = self.release["commit"]
-        self.source_format = (
-            "tar" if android_version.startswith("12.0.0") else "zip")
-        if self.source_format == "tar":
-            self.dl_link = self.release["source_url"]
-            archive_name = "libndk_translation-12.0.0.tar"
-        else:
-            self.dl_link = "https://codeload.github.com/{}/zip/{}".format(
-                self.repository, self.commit)
-            archive_name = "libndktranslation-{}.zip".format(android_version)
-        self.dl_file_name = os.path.join(self.download_loc, archive_name)
+        self.dl_link = "https://codeload.github.com/{}/zip/{}".format(
+            self.repository, self.commit)
+        self.dl_file_name = os.path.join(
+            self.download_loc,
+            "libndktranslation-{}.zip".format(android_version))
         self.extract_to = "/tmp/libndkunpack-{}".format(android_version)
-        self.archive_root = None if self.source_format == "tar" else (
+        self.archive_root = (
             "vendor_google_proprietary_ndk_translation-prebuilt-{}".format(
                 self.commit))
         self.act_sha256 = self.release["archive_sha256"]
 
     def validate_source(self, source_root):
-        if self.source_format == "tar":
-            self._validate_tar_source(source_root)
-            return
-
         readme_path = os.path.join(source_root, "README.md")
         with open(readme_path, encoding="utf-8") as readme:
             if self.release["fingerprint"] not in readme.read():
@@ -116,11 +91,6 @@ class Ndk(General):
 
         prebuilt_dir = os.path.join(source_root, "prebuilts")
         library_hashes = self.release["library_sha256"]
-        if self.arm64_only:
-            library_hashes = {
-                path: checksum for path, checksum in library_hashes.items()
-                if path.startswith("lib64/")
-            }
         for relative_path, expected_sha256 in library_hashes.items():
             library_path = os.path.join(prebuilt_dir, relative_path)
             actual_sha256 = file_checksum(library_path, "sha256")
@@ -128,111 +98,18 @@ class Ndk(General):
                 raise ValueError(
                     "SHA-256 mismatch for {}: expected {}, got {}".format(
                         relative_path, expected_sha256, actual_sha256))
-            machine = (
-                "X86-64" if relative_path.startswith("lib64/") else "80386")
-            self.validate_elf(library_path, machine)
 
-        required_files = self.executable_files() + (
+        required_files = self.executable_files + (
             "etc/init/ndk_translation.rc",)
-        if self.arm64_only or self.android_version.startswith("12.0.0"):
-            required_files += ("etc/ld.config.arm64.txt",)
         for relative_path in required_files:
             required_path = os.path.join(prebuilt_dir, relative_path)
             if not os.path.isfile(required_path):
                 raise FileNotFoundError(
                     "Missing NDK translation file: {}".format(required_path))
 
-    def _validate_tar_source(self, source_root):
-        for relative_path, expected_sha256 in self.release[
-                "library_sha256"].items():
-            library_path = os.path.join(source_root, relative_path)
-            actual_sha256 = file_checksum(library_path, "sha256")
-            if actual_sha256 != expected_sha256:
-                raise ValueError(
-                    "SHA-256 mismatch for {}: expected {}, got {}".format(
-                        relative_path, expected_sha256, actual_sha256))
-            self.validate_elf(library_path, "X86-64", android_api=31)
-
-        runner_path = os.path.join(
-            source_root, "bin/ndk_translation_program_runner_binfmt_misc_arm64")
-        self.validate_elf(runner_path, "X86-64", android_api=31)
-
-        self.validate_elf(
-            os.path.join(source_root, "bin/arm64/linker64"), "AArch64")
-        for relative_path in (
-                "bin/arm64/app_process64",
-                "lib64/arm64/libc.so",
-                "lib64/arm64/libdl.so",
-                "lib64/arm64/libm.so"):
-            guest_path = os.path.join(source_root, relative_path)
-            self.validate_elf(
-                guest_path,
-                "AArch64",
-                android_api=(31 if relative_path != "lib64/arm64/libdl.so"
-                             else None))
-
-        config_path = os.path.join(source_root, "etc/ld.config.arm64.txt")
-        if not os.path.isfile(config_path) or os.path.getsize(config_path) == 0:
-            raise FileNotFoundError(
-                "Missing or empty NDK guest linker config: {}".format(config_path))
-
-        proxy_paths = sorted(glob.glob(os.path.join(
-            source_root, "lib64/libndk_translation_proxy_*.so")))
-        if not proxy_paths:
-            raise FileNotFoundError(
-                "Missing NDK translation proxy libraries in {}".format(
-                    os.path.join(source_root, "lib64")))
-        for proxy_path in proxy_paths:
-            self.validate_elf(proxy_path, "X86-64", android_api=31)
-
-        for relative_path in (
-                "binfmt_misc/arm64_dyn",
-                "binfmt_misc/arm64_exe"):
-            registration_path = os.path.join(source_root, "etc", relative_path)
-            if not os.path.isfile(registration_path):
-                raise FileNotFoundError(
-                    "Missing NDK translation file: {}".format(registration_path))
-
-        init_path = os.path.join(source_root, "etc/init/ndk_translation.rc")
-        if not os.path.isfile(init_path):
-            raise FileNotFoundError(
-                "Missing NDK translation file: {}".format(init_path))
-
-        for relative_path in ("lib64/libnb.so", "lib/libnb.so"):
-            link_path = os.path.join(source_root, relative_path)
-            if not os.path.islink(link_path) or os.readlink(link_path) != (
-                    "libndk_translation.so"):
-                raise ValueError(
-                    "NDK translation symlink is invalid: {}".format(link_path))
-
-    def executable_files(self):
-        if self.source_format == "tar":
-            return self.android_12_tar_host_executable_files
-        if self.arm64_only:
-            return self.android_12_executable_files
-        if self.android_version.startswith("12.0.0"):
-            return self.android_12_executable_files
-        return self.all_executable_files
-
-    def copy_paths(self):
-        if self.source_format == "tar":
-            return self.android_12_tar_host_copy_paths
-        if self.arm64_only or self.android_version.startswith("12.0.0"):
-            return (
-                "bin/ndk_translation_program_runner_binfmt_misc_arm64",
-                "etc/binfmt_misc/arm64_dyn",
-                "etc/binfmt_misc/arm64_exe",
-                "etc/init/ndk_translation.rc",
-                "etc/ld.config.arm64.txt",
-                "lib64/libndk_translation.so",
-            )
-        if not self.android_version.startswith("12.0.0"):
-            return (".",)
-        return ()
-
     def normalize_permissions(self, system_dir):
         # GitHub ZIP extraction does not reliably preserve executable bits.
-        # Normalize the tree, then opt in only the runtime executables.
+        # Normalize the tree, then opt in only the six runtime executables.
         for parent, directories, files in os.walk(system_dir):
             os.chmod(parent, 0o755)
             for directory in directories:
@@ -242,84 +119,29 @@ class Ndk(General):
                 if not os.path.islink(file_path):
                     os.chmod(file_path, 0o644)
 
-        for relative_path in self.executable_files():
+        for relative_path in self.executable_files:
             os.chmod(os.path.join(system_dir, relative_path), 0o755)
 
     def download(self):
         print_color("Downloading libndk now .....", bcolors.GREEN)
         super().download()
 
-    def extract(self):
-        if self.source_format != "tar":
-            return super().extract()
-
-        print_color("Extracting archive...", bcolors.GREEN)
-        print(self.dl_file_name)
-        print(self.extract_to)
-        if os.path.exists(self.extract_to):
-            shutil.rmtree(self.extract_to)
-        os.makedirs(self.extract_to, exist_ok=True)
-        with tarfile.open(self.dl_file_name, "r:") as archive:
-            try:
-                archive.extractall(self.extract_to, filter="data")
-            except TypeError:
-                # Python < 3.12 has no extraction filter. The archive is
-                # pinned and checksum-verified before this point.
-                archive.extractall(self.extract_to)
-
     def copy(self):
         if os.path.exists(self.copy_dir):
             shutil.rmtree(self.copy_dir)
 
         print_color("Copying libndk library files ...", bcolors.GREEN)
-        source_root = (os.path.join(self.extract_to, "system")
-                       if self.source_format == "tar" else
-                       os.path.join(self.extract_to, self.archive_root))
+        source_root = os.path.join(self.extract_to, self.archive_root)
         self.validate_source(source_root)
         system_dir = os.path.join(self.copy_dir, "system")
-        if self.source_format == "tar":
-            # The archive also contains a guest sysroot. AOSP's
-            # native_bridge_support owns the installed guest libc and linker,
-            # so copy only the host translator, runner, registrations, and
-            # private linker configuration from this archive.
-            for relative_path in self.copy_paths():
-                source_path = os.path.join(source_root, relative_path)
-                target_path = os.path.join(system_dir, relative_path)
-                if not os.path.lexists(source_path):
-                    raise FileNotFoundError(
-                        "Missing NDK translation host file: {}".format(
-                            source_path))
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                shutil.copy2(source_path, target_path, follow_symlinks=False)
-
-            proxy_paths = sorted(glob.glob(os.path.join(
-                source_root, "lib64/libndk_translation_proxy_*.so")))
-            for source_path in proxy_paths:
-                target_path = os.path.join(
-                    system_dir, os.path.relpath(source_path, source_root))
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                shutil.copy2(source_path, target_path, follow_symlinks=False)
-        else:
-            source_dir = os.path.join(source_root, "prebuilts")
-            for relative_path in self.copy_paths():
-                source_path = os.path.join(source_dir, relative_path)
-                target_path = os.path.join(system_dir, relative_path)
-                if relative_path == ".":
-                    shutil.copytree(source_dir, system_dir, dirs_exist_ok=True)
-                elif os.path.isdir(source_path):
-                    shutil.copytree(source_path, target_path, dirs_exist_ok=True)
-                else:
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    shutil.copy2(source_path, target_path)
+        shutil.copytree(
+            os.path.join(source_root, "prebuilts"), system_dir,
+            dirs_exist_ok=True)
         self.normalize_permissions(system_dir)
-        if self.android_version.startswith("12.0.0"):
-            self.route_binfmt_to(
-                system_dir, "/system/bin/floral_nativebridge_runner")
 
         init_path = os.path.join(
             system_dir, "etc", "init", "ndk_translation.rc")
-        if os.path.isfile(init_path):
-            os.chmod(init_path, 0o644)
+        os.chmod(init_path, 0o644)
         # if not os.path.isfile(init_path):
         #     os.makedirs(os.path.dirname(init_path), exist_ok=True)
         # with open(init_path, "w") as initfile:

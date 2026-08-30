@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import os
 import stat
 import sys
@@ -278,6 +279,75 @@ class RedroidTest(unittest.TestCase):
 
         self.assertEqual(error.exception.code, 2)
 
+    def test_native_bridge_entrypoint_injects_houdini_properties(self):
+        image_config = [{
+            "Config": {
+                "Entrypoint": ["/init", "androidboot.hardware=floral"],
+                "Cmd": None,
+            }
+        }]
+        with patch("patch.subprocess.run") as inspect:
+            inspect.return_value.stdout = json.dumps(image_config)
+
+            dockerfile = redroid.native_bridge_entrypoint(
+                "docker", "floral:12.0.0", "houdini")
+
+        self.assertEqual(
+            dockerfile,
+            "ENTRYPOINT [\"/init\", \"androidboot.hardware=floral\", "
+            "\"ro.dalvik.vm.native.bridge=libhoudini.so\", "
+            "\"ro.enable.native.bridge.exec=1\", "
+            "\"ro.enable.native.bridge.exec64=1\", "
+            "\"ro.dalvik.vm.isa.arm=x86\", "
+            "\"ro.dalvik.vm.isa.arm64=x86_64\"]\n",
+        )
+        inspect.assert_called_once_with(
+            ["docker", "image", "inspect", "floral:12.0.0"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_native_bridge_entrypoint_injects_ndk_properties_and_cmd(self):
+        image_config = [{
+            "Config": {
+                "Entrypoint": ["/init", "androidboot.hardware=floral"],
+                "Cmd": ["androidboot.use_memfd=1"],
+            }
+        }]
+        with patch("patch.subprocess.run") as inspect:
+            inspect.return_value.stdout = json.dumps(image_config)
+
+            dockerfile = redroid.native_bridge_entrypoint(
+                "podman", "floral:12.0.0", "ndk")
+
+        self.assertIn(
+            "ro.dalvik.vm.native.bridge=libndk_translation.so", dockerfile)
+        self.assertIn(
+            "ro.enable.native.bridge.exec64=1", dockerfile)
+        self.assertTrue(dockerfile.endswith(
+            'CMD ["androidboot.use_memfd=1"]\n'))
+
+    def test_translation_backends_are_mutually_exclusive(self):
+        arguments = [
+            "redroid.py",
+            "-a",
+            "12.0.0",
+            "-b",
+            "floral:12.0.0",
+            "-o",
+            "floral:12.0.0-mixed",
+            "-n",
+            "-i",
+        ]
+
+        with patch.object(sys, "argv", arguments), \
+                redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                redroid.main()
+
+        self.assertEqual(error.exception.code, 2)
+
     def test_custom_base_image_is_preserved(self):
         arguments = [
             "redroid.py",
@@ -325,6 +395,7 @@ class RedroidTest(unittest.TestCase):
             with patch.object(sys, "argv", arguments), \
                     patch("patch.Ndk") as ndk, \
                     patch("patch.helper.host", return_value=("x86_64", 64)), \
+                    patch("patch.native_bridge_entrypoint", return_value="ENTRYPOINT\n") as entrypoint, \
                     patch("patch.subprocess.run"), \
                     patch("builtins.print"):
                 os.chdir(work_dir)
@@ -335,6 +406,8 @@ class RedroidTest(unittest.TestCase):
 
         ndk.assert_called_once_with("12.0.0")
         ndk.return_value.install.assert_called_once_with()
+        entrypoint.assert_called_once_with(
+            "docker", "floral:12.0.0", "ndk")
 
 
 if __name__ == "__main__":

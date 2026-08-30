@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 from stuff.gapps import Gapps
 from stuff.litegapps import LiteGapps
 from stuff.magisk import Magisk
@@ -11,6 +12,60 @@ from stuff.houdini_hack import Houdini_Hack
 from stuff.widevine import Widevine
 import tools.helper as helper
 import subprocess
+
+
+NATIVE_BRIDGE_BOOT_PROPERTIES = {
+    "houdini": (
+        "ro.dalvik.vm.native.bridge=libhoudini.so",
+        "ro.enable.native.bridge.exec=1",
+        "ro.enable.native.bridge.exec64=1",
+        "ro.dalvik.vm.isa.arm=x86",
+        "ro.dalvik.vm.isa.arm64=x86_64",
+    ),
+    "ndk": (
+        "ro.dalvik.vm.native.bridge=libndk_translation.so",
+        "ro.enable.native.bridge.exec=1",
+        "ro.enable.native.bridge.exec64=1",
+        "ro.dalvik.vm.isa.arm=x86",
+        "ro.dalvik.vm.isa.arm64=x86_64",
+    ),
+}
+
+
+def native_bridge_entrypoint(container, base_image, backend):
+    """Extend the base /init entrypoint with backend boot properties."""
+    # NativeBridge and binfmt properties are consumed during init, so a
+    # post-boot setprop cannot replace the base image's read-only values.
+    result = subprocess.run(
+        [container, "image", "inspect", base_image],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        image = json.loads(result.stdout)[0]
+        config = image["Config"]
+        entrypoint = config["Entrypoint"]
+        command = config.get("Cmd")
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "Cannot inspect entrypoint for base image {}".format(base_image)
+        ) from error
+
+    if (not isinstance(entrypoint, list) or not entrypoint
+            or entrypoint[0] != "/init"):
+        raise RuntimeError(
+            "Base image {} must use /init entrypoint for native bridge "
+            "property injection".format(base_image))
+    if command is not None and not isinstance(command, list):
+        raise RuntimeError(
+            "Base image {} has an unsupported non-list Cmd".format(base_image))
+
+    entrypoint = entrypoint + list(NATIVE_BRIDGE_BOOT_PROPERTIES[backend])
+    dockerfile = "ENTRYPOINT {}\n".format(json.dumps(entrypoint))
+    if command:
+        dockerfile += "CMD {}\n".format(json.dumps(command))
+    return dockerfile
 
 
 def main():
@@ -38,14 +93,15 @@ def main():
                         dest='litegapps',
                         help='Install LiteGapps to ReDroid',
                         action='store_true')
-    parser.add_argument('-n', '--install-ndk-translation',
-                        dest='ndk',
-                        help='Install libndk translation files',
-                        action='store_true')
-    parser.add_argument('-i', '--install-houdini',
-                        dest='houdini',
-                        help='Install houdini files',
-                        action='store_true')
+    translation_group = parser.add_mutually_exclusive_group()
+    translation_group.add_argument('-n', '--install-ndk-translation',
+                                   dest='ndk',
+                                   help='Install libndk translation files',
+                                   action='store_true')
+    translation_group.add_argument('-i', '--install-houdini',
+                                   dest='houdini',
+                                   help='Install houdini files',
+                                   action='store_true')
     parser.add_argument('-mtg', '--install-mindthegapps',
                         dest='mindthegapps',
                         help='Install MindTheGapps to ReDroid',
@@ -104,6 +160,10 @@ def main():
     if args.widevine:
         Widevine(args.android).install()
         dockerfile = dockerfile+"COPY widevine /\n"
+    backend = "houdini" if args.houdini else "ndk" if args.ndk else None
+    if backend:
+        dockerfile += native_bridge_entrypoint(
+            args.container, args.base_image, backend)
     print("\nDockerfile\n"+dockerfile)
     with open("./Dockerfile", "w") as f:
         f.write(dockerfile)

@@ -213,9 +213,12 @@ class RedroidTest(unittest.TestCase):
         self.assertEqual(
             Magisk.dl_link,
             "https://github.com/FloralDroid/Magisk/releases/download/"
-            "v30.7-floral.1/Magisk-v30.7-floral.1.apk",
+            "v30.7-floral.2/Magisk-v30.7-floral.2.apk",
         )
-        self.assertEqual(Magisk.act_md5, "4e7adff8ddaea6cad9a47a67f89ad881")
+        self.assertEqual(
+            Magisk.act_sha256,
+            "45256c900d2d907ff5692347b2a4dd2c20c0e8782f32b56fb45786c51dcbd41f",
+        )
 
     def test_magisk_manager_install_checks_actual_package(self):
         self.assertIn("pm uninstall com.topjohnwu.magisk", Magisk.bootanim_component)

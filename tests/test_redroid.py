@@ -221,9 +221,11 @@ class RedroidTest(unittest.TestCase):
         )
 
     def test_magisk_manager_install_checks_actual_package(self):
-        self.assertIn("pm uninstall com.topjohnwu.magisk", Magisk.bootanim_component)
+        self.assertIn("pm path com.topjohnwu.magisk", Magisk.bootanim_component)
         self.assertNotIn("io.github.huskydg.magisk", Magisk.bootanim_component)
-        self.assertIn("pm install -r /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
+        self.assertIn("pm install /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
+        self.assertNotIn("pm uninstall com.topjohnwu.magisk", Magisk.bootanim_component)
+        self.assertNotIn("pm install -r /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
 
     def test_magisk_bootstrap_handles_disabled_selinux_and_early_post_fs_data(self):
         self.assertEqual(

@@ -3,7 +3,7 @@ import os
 import shutil
 import re
 from stuff.general import General
-from tools.helper import bcolors, download_file, host, print_color, get_download_dir
+from tools.helper import bcolors, download_file, print_color, get_download_dir
 
 class Magisk(General):
     download_loc = get_download_dir()
@@ -13,7 +13,6 @@ class Magisk(General):
     extract_to = "/tmp/magisk_unpack"
     copy_dir = "./magisk"
     magisk_dir = os.path.join(copy_dir, "system", "etc", "init", "magisk")
-    machine = host()
     oringinal_bootanim = """
 service bootanim /system/bin/bootanimation
     class core animation
@@ -55,6 +54,17 @@ on property:init.svc.zygote=stopped
     exec u:r:su:s0 root root -- {MAGISKTMP}/magisk --auto-selinux --zygote-restart
     """.format(MAGISKSYSTEMDIR="/system/etc/init/magisk", MAGISKTMP="/sbin", magisk_name="magisk")
 
+    def __init__(self, architecture):
+        arch_map = {
+            "386": "x86",
+            "amd64": "x86_64",
+            "arm": "armeabi-v7a",
+            "arm64": "arm64-v8a",
+        }
+        if architecture not in arch_map:
+            raise ValueError("Unsupported Magisk image architecture: {}".format(architecture))
+        self.abi = arch_map[architecture]
+
     def download(self):
         print_color("Downloading latest Magisk now .....", bcolors.GREEN)
         super().download()   
@@ -70,13 +80,7 @@ on property:init.svc.zygote=stopped
 
         print_color("Copying magisk libs now ...", bcolors.GREEN)
         
-        arch_map = {
-            "x86": "x86",
-            "x86_64": "x86_64",
-            "arm": "armeabi-v7a",
-            "arm64": "arm64-v8a"
-        }
-        lib_dir = os.path.join(self.extract_to, "lib", arch_map[self.machine[0]])
+        lib_dir = os.path.join(self.extract_to, "lib", self.abi)
         for parent, dirnames, filenames in os.walk(lib_dir):
             for filename in filenames:
                 o_path = os.path.join(lib_dir, filename)  

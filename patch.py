@@ -155,7 +155,15 @@ def main():
             helper.print_color(
                 "WARNING: Houdini seems to work only above redroid:11.0.0", helper.bcolors.YELLOW)
     if args.magisk:
-        Magisk().install()
+        # The script host can differ from the base image (e.g. x86 building ARM64).
+        image_architecture = subprocess.run(
+            [args.container, "image", "inspect", "--format", "{{.Architecture}}",
+             args.base_image],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        Magisk(image_architecture).install()
         dockerfile = dockerfile+"COPY magisk /\n"
     if args.widevine:
         Widevine(args.android).install()
@@ -168,7 +176,10 @@ def main():
     with open("./Dockerfile", "w") as f:
         f.write(dockerfile)
     new_image_name = args.output_image
-    subprocess.run([args.container, "build", "-t", new_image_name, "."], check=True)
+    build_command = [args.container, "build", "-t", new_image_name]
+    if args.magisk:
+        build_command.extend(["--platform", "linux/" + image_architecture])
+    subprocess.run(build_command + ["."], check=True)
     helper.print_color("Successfully built {}".format(
         new_image_name), helper.bcolors.GREEN)
 

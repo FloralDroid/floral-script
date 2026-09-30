@@ -220,6 +220,78 @@ class RedroidTest(unittest.TestCase):
             "45256c900d2d907ff5692347b2a4dd2c20c0e8782f32b56fb45786c51dcbd41f",
         )
 
+    def test_magisk_build_selects_binaries_for_base_image_architecture(self):
+        cases = (
+            ("docker", "arm64", "arm64-v8a"),
+            ("podman", "arm64", "arm64-v8a"),
+            ("docker", "amd64", "x86_64"),
+            ("docker", "arm", "armeabi-v7a"),
+            ("docker", "386", "x86"),
+        )
+        for container, architecture, abi in cases:
+            with self.subTest(container=container, architecture=architecture), \
+                    tempfile.TemporaryDirectory() as work_dir:
+                source_apk = os.path.join(work_dir, "magisk.apk")
+                with zipfile.ZipFile(source_apk, "w") as archive:
+                    for source_abi in ("arm64-v8a", "armeabi-v7a", "x86", "x86_64"):
+                        archive.writestr(
+                            "lib/{}/libmagisk.so".format(source_abi),
+                            source_abi.encode("utf-8"))
+                    archive.writestr("assets/stub.apk", b"stub")
+                arguments = [
+                    "redroid.py", "-b", "floral:12.0.0-arm64",
+                    "-o", "floral:12.0.0-magisk", "-m", "-c", container,
+                ]
+                original_dir = os.getcwd()
+                with patch.object(sys, "argv", arguments), \
+                        patch("tools.helper.platform.machine", return_value="x86_64"), \
+                        patch.object(Magisk, "dl_file_name", source_apk), \
+                        patch.object(Magisk, "extract_to", os.path.join(work_dir, "extract")), \
+                        patch.object(Magisk, "download"), \
+                        patch("patch.subprocess.run") as commands, \
+                        patch("builtins.print"):
+                    commands.return_value.stdout = architecture + "\n"
+                    os.chdir(work_dir)
+                    try:
+                        redroid.main()
+                    finally:
+                        os.chdir(original_dir)
+
+                magisk_path = os.path.join(
+                    work_dir, "magisk", "system", "etc", "init", "magisk", "magisk")
+                with open(magisk_path, "rb") as native:
+                    self.assertEqual(native.read(), abi.encode("utf-8"))
+                self.assertEqual(stat.S_IMODE(os.stat(magisk_path).st_mode), 0o755)
+                commands.assert_any_call(
+                    [container, "image", "inspect", "--format", "{{.Architecture}}",
+                     "floral:12.0.0-arm64"],
+                    check=True, capture_output=True, text=True,
+                )
+                commands.assert_any_call(
+                    [container, "build", "-t", "floral:12.0.0-magisk",
+                     "--platform", "linux/" + architecture, "."],
+                    check=True,
+                )
+
+    def test_magisk_rejects_unknown_image_architecture(self):
+        for architecture in ("", "riscv64"):
+            with self.subTest(architecture=architecture):
+                with self.assertRaisesRegex(ValueError, "Unsupported Magisk image architecture"):
+                    Magisk(architecture)
+
+    def test_magisk_build_stops_if_image_inspection_fails(self):
+        arguments = ["redroid.py", "-b", "floral:12.0.0-arm64",
+                     "-o", "floral:12.0.0-magisk", "-m"]
+        with patch.object(sys, "argv", arguments), \
+                patch("patch.subprocess.run") as commands, \
+                patch("patch.Magisk") as magisk:
+            commands.side_effect = redroid.subprocess.CalledProcessError(1, "docker")
+            with self.assertRaises(redroid.subprocess.CalledProcessError):
+                redroid.main()
+
+        commands.assert_called_once()
+        magisk.assert_not_called()
+
     def test_magisk_manager_install_checks_actual_package(self):
         self.assertIn("pm path com.topjohnwu.magisk", Magisk.bootanim_component)
         self.assertNotIn("io.github.huskydg.magisk", Magisk.bootanim_component)
@@ -267,7 +339,7 @@ class RedroidTest(unittest.TestCase):
                     patch.object(Magisk, "copy_dir", copy_dir), \
                     patch.object(Magisk, "magisk_dir", magisk_dir), \
                     patch.object(Magisk, "dl_file_name", source_apk):
-                Magisk().copy()
+                Magisk("amd64").copy()
 
             with open(os.path.join(magisk_dir, "stub.apk"), "rb") as stub:
                 self.assertEqual(stub.read(), b"stub")

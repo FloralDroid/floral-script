@@ -2,7 +2,9 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -298,6 +300,73 @@ class RedroidTest(unittest.TestCase):
         self.assertIn("pm install /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
         self.assertNotIn("pm uninstall com.topjohnwu.magisk", Magisk.bootanim_component)
         self.assertNotIn("pm install -r /system/etc/init/magisk/magisk.apk", Magisk.bootanim_component)
+
+    def test_magisk_installs_full_manager_before_boot_complete(self):
+        boot_complete = Magisk.bootanim_component.split(
+            "on property:sys.boot_completed=1\n", 1)[1].split("\non ", 1)[0]
+        commands = [
+            shlex.split(line.split(" -- ", 1)[1])
+            for line in boot_complete.splitlines()
+            if line.strip().startswith("exec ")
+        ]
+        for installed in (False, True):
+            with self.subTest(installed=installed), \
+                    tempfile.TemporaryDirectory() as work_dir:
+                package_path = os.path.join(work_dir, "package")
+                events_path = os.path.join(work_dir, "events")
+                if installed:
+                    with open(package_path, "w") as package:
+                        package.write("manager")
+
+                # Model the daemon's stub install finishing before the next
+                # init command, a valid outcome of its asynchronous installer.
+                scripts = {
+                    "magisk": """#!/bin/sh
+printf 'boot-complete\\n' >> "$MAGISK_TEST_EVENTS"
+if [ ! -f "$MAGISK_TEST_PACKAGE" ]; then
+    printf stub > "$MAGISK_TEST_PACKAGE"
+fi
+""",
+                    "pm": """#!/bin/sh
+case "$1" in
+    path) [ -f "$MAGISK_TEST_PACKAGE" ] ;;
+    install)
+        printf manager > "$MAGISK_TEST_PACKAGE"
+        printf 'install\\n' >> "$MAGISK_TEST_EVENTS"
+        ;;
+    *) exit 1 ;;
+esac
+""",
+                }
+                for name, script in scripts.items():
+                    script_path = os.path.join(work_dir, name)
+                    with open(script_path, "w") as executable:
+                        executable.write(script)
+                    os.chmod(script_path, 0o755)
+
+                environment = dict(
+                    os.environ,
+                    PATH=work_dir + os.pathsep + os.environ["PATH"],
+                    MAGISK_TEST_PACKAGE=package_path,
+                    MAGISK_TEST_EVENTS=events_path,
+                )
+                for command in commands:
+                    executable = {
+                        "/system/bin/sh": "/bin/sh",
+                        "/sbin/magisk": os.path.join(work_dir, "magisk"),
+                    }[command[0]]
+                    subprocess.run(
+                        [executable] + command[1:], env=environment,
+                        check=True, capture_output=True, text=True,
+                    )
+
+                with open(package_path) as package:
+                    self.assertEqual(package.read(), "manager")
+                with open(events_path) as events:
+                    self.assertEqual(
+                        events.read().splitlines(),
+                        ["boot-complete"] if installed else ["install", "boot-complete"],
+                    )
 
     def test_magisk_bootstrap_handles_disabled_selinux_and_early_post_fs_data(self):
         self.assertEqual(

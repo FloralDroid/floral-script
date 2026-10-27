@@ -38,6 +38,8 @@ class Widevine(General):
                        "fed6898b5cfd2a908cb134df97802554"]
         }
     }
+    dl_links["x86_64"]["12.1.0"] = dl_links["x86_64"]["12.0.0"]
+    dl_links["x86_64"]["12.1.0_64only"] = dl_links["x86_64"]["12.0.0"]
     dl_file_name = os.path.join(download_loc, "widevine.zip")
     extract_to = "/tmp/widevineunpack"
 

@@ -57,6 +57,8 @@ on property:sys.boot_completed=1
         #     "https://github.com/rote66/vendor_intel_proprietary_houdini/archive/debc3dc91cf12b5c5b8a1c546a5b0b7bf7f838a8.zip",
         #     "cb7ffac26d47ec7c89df43818e126b47"]
     }
+    dl_links["12.1.0"] = dl_links["12.0.0"]
+    dl_links["12.1.0_64only"] = dl_links["12.0.0"]
     dl_file_name = os.path.join(download_loc, "libhoudini.zip")
     extract_to = "/tmp/houdiniunpack"
 

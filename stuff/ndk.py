@@ -40,6 +40,8 @@ class Ndk(General):
         "11.0.0": android_11_release,
         "12.0.0": android_12_release,
         "12.0.0_64only": android_12_release,
+        "12.1.0": android_12_release,
+        "12.1.0_64only": android_12_release,
     }
     executable_files = (
         "bin/arm/app_process",

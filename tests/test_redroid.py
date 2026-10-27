@@ -16,8 +16,11 @@ import patch as redroid
 from stuff.general import General
 from stuff.houdini import Houdini
 from stuff.houdini_hack import Houdini_Hack
+from stuff.litegapps import LiteGapps
 from stuff.magisk import Magisk
+from stuff.mindthegapps import MindTheGapps
 from stuff.ndk import Ndk
+from stuff.widevine import Widevine
 
 
 class RedroidTest(unittest.TestCase):
@@ -33,7 +36,86 @@ class RedroidTest(unittest.TestCase):
             android_12.commit,
             "181d9290a69309511185c4417ba3d890b3caaaa8")
         self.assertEqual(android_12.release, android_12_64only.release)
+        for version in ("12.1.0", "12.1.0_64only"):
+            self.assertEqual(Ndk(version).release, android_12.release)
         self.assertNotEqual(android_11.dl_file_name, android_12.dl_file_name)
+
+    def test_android_12l_packages_match_version_and_architecture(self):
+        for version in ("12.1.0", "12.1.0_64only"):
+            self.assertEqual(Houdini(version).dl_link, Houdini("12.0.0").dl_link)
+            for architecture in ("x86_64", "arm64"):
+                with patch.object(MindTheGapps, "arch", (architecture, 64)):
+                    self.assertIn("MindTheGapps-12.1.0-" + architecture,
+                                  MindTheGapps(version).dl_link)
+            with patch.object(LiteGapps, "arch", ("arm64", 64)):
+                self.assertIn("/arm64/32/", LiteGapps(version).dl_link)
+            with patch.object(Widevine, "machine", ("x86_64", 64)):
+                self.assertEqual(Widevine(version).dl_link,
+                                 Widevine("12.0.0").dl_link)
+        with patch.object(LiteGapps, "arch", ("arm", 32)):
+            self.assertIn("/arm/32/", LiteGapps("12.1.0").dl_link)
+        self.assertEqual(LiteGapps.api_level_map["12.1.0"], "32")
+
+    def test_houdini_12l_preserves_base_init_and_removes_container(self):
+        bootstrap = ("    exec -- /system/bin/bootstrap/linkerconfig "
+                     "--target /linkerconfig/bootstrap\n")
+        original = ("# Base image customization\non early-init\n" + bootstrap
+                    + "    update_linker_config\non post-fs-data\n"
+                    "    perform_apex_config\n    start custom-service\n")
+        for content in (original, original.replace(bootstrap, "")):
+            with self.subTest(valid=content == original), \
+                    tempfile.TemporaryDirectory() as work_dir:
+                installer = Houdini_Hack("12.1.0")
+                installer.copy_dir = os.path.join(work_dir, "houdini")
+
+                def container_command(command, **kwargs):
+                    if command[1] == "cp":
+                        with open(command[-1], "w", encoding="utf-8") as init:
+                            init.write(content)
+                    return subprocess.CompletedProcess(command, 0, "test-container\n")
+
+                with patch("stuff.houdini_hack.subprocess.run",
+                           side_effect=container_command) as container:
+                    if content == original:
+                        installer.install_12l("podman", "floral:12.1.0")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "init.rc"):
+                            installer.install_12l("podman", "floral:12.1.0")
+                container.assert_any_call(
+                    ["podman", "rm", "test-container"], check=True)
+                if content == original:
+                    init_path = os.path.join(installer.copy_dir, "system",
+                                             "etc", "init", "hw", "init.rc")
+                    with open(init_path, encoding="utf-8") as init:
+                        patched = init.read()
+                    hook_lines = [line for line in patched.splitlines(True)
+                                  if "/system/etc/houdini-12l.sh" in line]
+                    self.assertEqual(len(hook_lines), 3)
+                    self.assertEqual("".join(line for line in patched.splitlines(True)
+                                             if line not in hook_lines), original)
+
+    def test_houdini_12l_linker_paths_preserve_rules_and_are_idempotent(self):
+        script = os.path.join(os.path.dirname(redroid.__file__), "stuff",
+                              "houdini_12l.sh")
+        original = ("[system]\nnamespace.default.isolated = true\n"
+                    "namespace.default.permitted.paths += /system/${LIB}/bootstrap\n"
+                    "namespace.sphal.search.paths += /vendor/${LIB}/hw\n"
+                    "namespace.sphal.permitted.paths += /system/vendor/${LIB}\n"
+                    "namespace.sphal.links = rs,default,vndk\n")
+        with tempfile.TemporaryDirectory() as work_dir:
+            config_path = os.path.join(work_dir, "ld.config.txt")
+            with open(config_path, "w", encoding="utf-8") as config:
+                config.write(original)
+            subprocess.run(["sh", script, work_dir], check=True)
+            with open(config_path, encoding="utf-8") as config:
+                patched = config.read()
+            self.assertIn("namespace.sphal.search.paths += /system/${LIB}/arm64/nb\n",
+                          patched)
+            for line in original.splitlines():
+                self.assertIn(line + "\n", patched)
+            subprocess.run(["sh", script, work_dir], check=True)
+            with open(config_path, encoding="utf-8") as config:
+                self.assertEqual(config.read(), patched)
 
     def test_ndk_rejects_unsupported_android_version(self):
         with self.assertRaisesRegex(ValueError, "Android 13.0.0"):
@@ -554,6 +636,41 @@ esac
         ndk.return_value.install.assert_called_once_with()
         entrypoint.assert_called_once_with(
             "docker", "floral:12.0.0", "ndk")
+
+    def test_android_12l_cli_dispatches_selected_installers(self):
+        for version in ("12.1.0", "12.1.0_64only"):
+            for flag, component, directory in (
+                    ("-n", "Ndk", "ndk"), ("-i", "Houdini", "houdini"),
+                    ("-mtg", "MindTheGapps", "mindthegapps"),
+                    ("-lg", "LiteGapps", "litegapps"),
+                    ("-w", "Widevine", "widevine"), ("-m", "Magisk", "magisk")):
+                with self.subTest(version=version, flag=flag), \
+                        tempfile.TemporaryDirectory() as work_dir:
+                    arguments = ["patch.py", "-a", version, "-b", "floral:" + version,
+                                 "-o", "floral:custom", flag]
+                    original_dir = os.getcwd()
+                    with patch.object(sys, "argv", arguments), \
+                            patch("patch." + component) as installer, \
+                            patch("patch.Houdini_Hack") as hack, \
+                            patch("patch.helper.host", return_value=("x86_64", 64)), \
+                            patch("patch.native_bridge_entrypoint", return_value=""), \
+                            patch("patch.subprocess.run") as command, \
+                            patch("builtins.print"):
+                        command.return_value.stdout = "arm64"
+                        os.chdir(work_dir)
+                        try:
+                            redroid.main()
+                        finally:
+                            os.chdir(original_dir)
+                        installer.assert_called_once_with(
+                            "arm64" if component == "Magisk" else version)
+                        installer.return_value.install.assert_called_once_with()
+                        if component == "Houdini":
+                            hack.return_value.install_12l.assert_called_once_with(
+                                "docker", "floral:" + version)
+                            hack.return_value.install.assert_not_called()
+                    with open(os.path.join(work_dir, "Dockerfile"), encoding="utf-8") as dockerfile:
+                        self.assertIn("COPY " + directory + " /\n", dockerfile.read())
 
 
 if __name__ == "__main__":

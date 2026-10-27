@@ -43,8 +43,42 @@ option:
 
 Use `-a` or `--android-version` to select the Android-compatible package
 versions. It must match the selected base image. The value can be `8.1.0`,
-`9.0.0`, `10.0.0`, `11.0.0`, `12.0.0`, `12.0.0_64only`, `13.0.0` or
-`14.0.0`. The default is `11.0.0`.
+`9.0.0`, `10.0.0`, `11.0.0`, `12.0.0`, `12.0.0_64only`, `12.1.0`,
+`12.1.0_64only`, `13.0.0` or `14.0.0`. The default is `11.0.0`.
+
+For an Android 12L base image, use `12.1.0` (or `12.1.0_64only` for a
+64-bit-only image). For example, to add Magisk:
+
+```bash
+python3 patch.py -a 12.1.0 \
+    -b floral:12.1.0 \
+    -o floral:12.1.0-magisk \
+    -m
+```
+
+Android 12L supports the following packages:
+
+| Option | Architectures | Package source |
+| --- | --- | --- |
+| Magisk (`-m`) | arm, arm64, x86, x86_64 | Existing Floral release, selected by base image architecture |
+| MindTheGapps (`-mtg`) | arm, arm64, x86, x86_64 | Existing Android 12.1 package |
+| LiteGapps (`-lg`) | arm, arm64 | Android 12.1 / API 32 package |
+| NDK translation (`-n`) | x86, x86_64 | Existing pinned Android 12 payload |
+| Houdini (`-i`) | x86, x86_64 | Existing pinned Android 12 payload with 12L linker setup |
+| Widevine (`-w`) | x86_64 | Existing pinned Android 12 payload |
+
+The `64only` variant selects 64-bit Gapps packages. OpenGapps (`-g`) remains
+limited to Android 11. Except for Magisk, package architecture selection uses
+the script host architecture, so run the script on a matching host.
+
+For Houdini on 12L, the script creates a stopped temporary container to read
+the base image's `init.rc`, then removes that container. It adds linker hooks
+to this file and preserves the image's other startup rules. Unexpected init
+layouts stop packaging with an error. This replaces the legacy overlay that
+copied an entire Android 12 `init.rc`.
+
+Android 12L translation and DRM runtime compatibility still requires testing
+with the built image; package checks and script tests do not verify it.
 
 ```bash
 # pull the latest image

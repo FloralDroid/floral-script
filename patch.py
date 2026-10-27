@@ -76,7 +76,7 @@ def main():
                         dest='android',
                         help='Specify the Android version to build',
                         default='11.0.0',
-                        choices=['14.0.0', '13.0.0', '12.0.0', '12.0.0_64only', '11.0.0', '10.0.0', '9.0.0', '8.1.0'])
+                        choices=['14.0.0', '13.0.0', '12.1.0', '12.1.0_64only', '12.0.0', '12.0.0_64only', '11.0.0', '10.0.0', '9.0.0', '8.1.0'])
     parser.add_argument('-b', '--base-image',
                         dest='base_image',
                         help='Specify the base container image',
@@ -135,20 +135,23 @@ def main():
         MindTheGapps(args.android).install()
         dockerfile = dockerfile + "COPY mindthegapps /\n"
     if args.ndk:
-        if args.android in ["11.0.0", "12.0.0", "12.0.0_64only"]:
+        if args.android in ["11.0.0", "12.0.0", "12.0.0_64only", "12.1.0", "12.1.0_64only"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
                 Ndk(args.android).install()
                 dockerfile = dockerfile+"COPY ndk /\n"
         else:
             helper.print_color(
-                "WARNING: Libndk seems to work only on redroid:11.0.0 or redroid:12.0.0", helper.bcolors.YELLOW)
+                "WARNING: Libndk packages are available only for Android 11, 12 and 12L", helper.bcolors.YELLOW)
     if args.houdini:
-        if args.android in ["8.1.0", "9.0.0", "11.0.0", "12.0.0", "13.0.0", "14.0.0"]:
+        if args.android in ["8.1.0", "9.0.0", "11.0.0", "12.0.0", "12.1.0", "12.1.0_64only", "13.0.0", "14.0.0"]:
             arch = helper.host()[0]
             if arch == "x86" or arch == "x86_64":
                 Houdini(args.android).install()
-                if not args.android == "8.1.0":
+                if args.android in ["12.1.0", "12.1.0_64only"]:
+                    Houdini_Hack(args.android).install_12l(
+                        args.container, args.base_image)
+                elif not args.android == "8.1.0":
                     Houdini_Hack(args.android).install()
                 dockerfile = dockerfile+"COPY houdini /\n"
         else:

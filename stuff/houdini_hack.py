@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import subprocess
 from stuff.general import General
 from tools.helper import bcolors, get_download_dir, print_color
 
@@ -52,3 +53,43 @@ class Houdini_Hack(General):
         if not self.version == "9.0.0":
             init_path = os.path.join(self.copy_dir, "system", "etc", "init", "hw", "init.rc")
             os.chmod(init_path, 0o644)
+
+    def install_12l(self, container, base_image):
+        # The legacy archive replaces init.rc with Android 12 content. Copy
+        # the selected image's file instead and retain its 12L customizations.
+        system_dir = os.path.join(self.copy_dir, "system")
+        init_dir = os.path.join(system_dir, "etc", "init", "hw")
+        os.makedirs(init_dir, exist_ok=True)
+        init_path = os.path.join(init_dir, "init.rc")
+        container_id = subprocess.run(
+            [container, "create", base_image], check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        try:
+            subprocess.run(
+                [container, "cp", container_id + ":/system/etc/init/hw/init.rc",
+                 init_path], check=True)
+        finally:
+            subprocess.run([container, "rm", container_id], check=True)
+
+        with open(init_path, encoding="utf-8") as init_file:
+            init = init_file.read()
+        hooks = (
+            ("    exec -- /system/bin/bootstrap/linkerconfig "
+             "--target /linkerconfig/bootstrap\n", "/linkerconfig/bootstrap"),
+            ("    update_linker_config\n", "/linkerconfig"),
+            ("    perform_apex_config\n", "/linkerconfig"),
+        )
+        for anchor, target in hooks:
+            if init.count(anchor) != 1:
+                raise ValueError("Unsupported Android 12L init.rc: " + anchor.strip())
+            init = init.replace(
+                anchor, anchor + "    exec -- /system/bin/sh "
+                "/system/etc/houdini-12l.sh " + target + "\n")
+        with open(init_path, "w", encoding="utf-8") as init_file:
+            init_file.write(init)
+        os.chmod(init_path, 0o644)
+        script_path = os.path.join(system_dir, "etc", "houdini-12l.sh")
+        shutil.copyfile(
+            os.path.join(os.path.dirname(__file__), "houdini_12l.sh"), script_path)
+        os.chmod(script_path, 0o644)

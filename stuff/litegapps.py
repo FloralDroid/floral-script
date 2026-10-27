@@ -86,6 +86,22 @@ class LiteGapps(General):
                 "a8b1181291fe70d1e838a8579218a47c",
             ],
         },
+        "12.1.0": {
+            "arm64": [
+                "https://sourceforge.net/projects/litegapps/files/litegapps/arm64/32/lite/2024-11-12/LiteGapps-arm64-12.1-20241112-official.zip",
+                "3c65fbfc4e333a6a7baa58634438ff04",
+            ],
+            "arm": [
+                "https://sourceforge.net/projects/litegapps/files/litegapps/arm/32/lite/2024-08-15/AUTO-LiteGapps-arm-12.1-20240815-official.zip",
+                "f74a2743779b87e4709a6c3f850e29cb",
+            ],
+        },
+        "12.1.0_64only": {
+            "arm64": [
+                "https://sourceforge.net/projects/litegapps/files/litegapps/arm64/32/lite/2024-11-12/LiteGapps-arm64-12.1-20241112-official.zip",
+                "3c65fbfc4e333a6a7baa58634438ff04",
+            ],
+        },
         "12.0.0": {
             "arm64": [
                 "https://sourceforge.net/projects/litegapps/files/litegapps/arm64/31/lite/2024-10-10/AUTO-LiteGapps-arm64-12.0-20241010-official.zip",
@@ -179,6 +195,7 @@ class LiteGapps(General):
         "15.0.0": "35",
         "14.0.0": "34",
         "13.0.0": "33",
+        "12.1.0": "32",
         "12.0.0": "31",
         "11.0.0": "30",
         "10.0.0": "29",

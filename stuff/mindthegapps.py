@@ -96,6 +96,9 @@ class MindTheGapps(General):
         },
     }
 
+    dl_links["12.1.0"] = dl_links["12.0.0"]
+    dl_links["12.1.0_64only"] = dl_links["12.0.0_64only"]
+
     arch = host()
     download_loc = get_download_dir()
     dl_file_name = os.path.join(download_loc, "mindthegapps.zip")
